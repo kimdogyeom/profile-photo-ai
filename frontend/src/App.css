@@ -9,7 +9,8 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: #f8f9fa;
+  background: linear-gradient(135deg, #0f0f0f 0%, #1a1a1a 50%, #0a0a0a 100%);
+  color: #e0e0e0;
 }
 
 .App {
@@ -47,4 +48,146 @@ input:focus, textarea:focus {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+}
+
+/* Login Page Styles */
+.button-group {
+  display: flex;
+}
+
+.divider {
+  position: relative;
+}
+
+.divider::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(to right, transparent, rgba(128, 128, 128, 0.3) 20%, rgba(128, 128, 128, 0.3) 80%, transparent);
+  z-index: 0;
+}
+
+.divider-text {
+  position: relative;
+  background: linear-gradient(135deg, #0f0f0f 0%, #1a1a1a 50%, #0a0a0a 100%);
+  padding: 0 16px;
+  z-index: 1;
+}
+
+/* Responsive styles for Login Page */
+@media (max-width: 1200px) {
+  /* Reduce gap between sections on smaller screens */
+  .login-page-content {
+    gap: 60px !important;
+  }
+}
+
+@media (max-width: 1024px) {
+  /* Stack layout vertically on tablets */
+  .login-page-content {
+    flex-direction: column !important;
+    gap: 40px !important;
+    text-align: center !important;
+  }
+
+  .login-page-left {
+    max-width: 100% !important;
+    align-items: center !important;
+  }
+
+  .login-page-title {
+    font-size: 48px !important;
+  }
+
+  .login-page-subtitle {
+    font-size: 20px !important;
+  }
+
+  .login-page-features {
+    align-items: center !important;
+  }
+
+  .login-page-right {
+    margin-top: 20px;
+  }
+}
+
+@media (max-width: 768px) {
+  /* Mobile optimizations */
+  .login-page-content {
+    padding: 20px 0 !important;
+  }
+
+  .login-page-subtitle {
+    font-size: 18px !important;
+    margin-bottom: 40px !important;
+  }
+
+  .login-page-features {
+    gap: 24px !important;
+  }
+
+  .login-page-feature-title {
+    font-size: 18px !important;
+  }
+
+  .login-page-feature-text {
+    font-size: 14px !important;
+  }
+
+  /* Button group - stack vertically on mobile */
+  .primary-btn,
+  .secondary-btn {
+    padding: 14px 24px !important;
+    font-size: 16px !important;
+  }
+
+  .google-login-button {
+    padding: 12px 20px !important;
+    font-size: 15px !important;
+  }
+
+  /* Hide phone mockup on mobile to reduce clutter */
+  .login-page-right {
+    display: none !important;
+  }
+}
+
+@media (max-width: 480px) {
+  /* Extra small mobile devices */
+  .login-page-subtitle {
+    font-size: 16px !important;
+  }
+
+  .login-page-features {
+    gap: 20px !important;
+  }
+
+  .login-page-feature {
+    flex-direction: column !important;
+    align-items: center !important;
+    text-align: center !important;
+  }
+
+  /* Stack buttons vertically on small screens */
+  .button-group {
+    flex-direction: column !important;
+    gap: 12px !important;
+  }
+
+  .primary-btn,
+  .secondary-btn {
+    width: 100% !important;
+    padding: 14px 24px !important;
+    font-size: 16px !important;
+  }
+
+  .google-login-button {
+    width: 100% !important;
+    padding: 12px 20px !important;
+    font-size: 15px !important;
+  }
 }

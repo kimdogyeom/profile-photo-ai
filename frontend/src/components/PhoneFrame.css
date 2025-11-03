@@ -1,0 +1,165 @@
+.phone-frame-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  perspective: 1000px;
+}
+
+.phone-frame {
+  position: relative;
+  width: 320px;
+  height: 650px;
+  background: linear-gradient(145deg, #2c3e50, #34495e);
+  border-radius: 45px;
+  padding: 12px;
+  box-shadow:
+    0 20px 60px rgba(0, 0, 0, 0.5),
+    inset 0 0 6px rgba(255, 255, 255, 0.1);
+  transform: translateZ(0);
+  animation: float 6s ease-in-out infinite;
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0px) rotateY(-5deg);
+  }
+  50% {
+    transform: translateY(-20px) rotateY(-5deg);
+  }
+}
+
+/* Power button */
+.power-button {
+  position: absolute;
+  right: -3px;
+  top: 120px;
+  width: 3px;
+  height: 60px;
+  background: linear-gradient(to right, #1a252f, #34495e);
+  border-radius: 0 3px 3px 0;
+}
+
+/* Volume buttons */
+.volume-button {
+  position: absolute;
+  left: -3px;
+  width: 3px;
+  background: linear-gradient(to left, #1a252f, #34495e);
+  border-radius: 3px 0 0 3px;
+}
+
+.volume-up {
+  top: 100px;
+  height: 40px;
+}
+
+.volume-down {
+  top: 150px;
+  height: 40px;
+}
+
+/* Phone body */
+.phone-body {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: #000;
+  border-radius: 36px;
+  overflow: hidden;
+  box-shadow: inset 0 0 8px rgba(0, 0, 0, 0.5);
+}
+
+/* Notch */
+.phone-notch {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 150px;
+  height: 28px;
+  background: #000;
+  border-radius: 0 0 20px 20px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.notch-speaker {
+  width: 50px;
+  height: 5px;
+  background: #1a1a1a;
+  border-radius: 3px;
+}
+
+.notch-camera {
+  width: 10px;
+  height: 10px;
+  background: #0a0a0a;
+  border-radius: 50%;
+  border: 1px solid #1a1a1a;
+}
+
+/* Screen */
+.phone-screen {
+  width: 100%;
+  height: 100%;
+  background: #fff;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Home indicator */
+.home-indicator {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 120px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 2px;
+  z-index: 10;
+}
+
+/* Responsive scaling */
+@media (max-width: 768px) {
+  .phone-frame {
+    width: 280px;
+    height: 570px;
+    border-radius: 40px;
+    padding: 10px;
+  }
+
+  .phone-body {
+    border-radius: 32px;
+  }
+
+  .phone-notch {
+    width: 130px;
+    height: 25px;
+  }
+}
+
+@media (max-width: 480px) {
+  .phone-frame {
+    width: 240px;
+    height: 490px;
+    border-radius: 35px;
+    padding: 8px;
+  }
+
+  .phone-body {
+    border-radius: 28px;
+  }
+
+  .phone-notch {
+    width: 110px;
+    height: 22px;
+  }
+
+  .home-indicator {
+    width: 100px;
+  }
+}

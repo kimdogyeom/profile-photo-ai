@@ -1,8 +1,9 @@
 .usage-quota {
-  background: white;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
-  padding: 1rem;
+  background: rgba(50, 50, 50, 0.4);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(102, 126, 234, 0.2);
+  border-radius: 12px;
+  padding: 1.25rem;
   margin: 1rem 0;
 }
 
@@ -11,42 +12,44 @@
   justify-content: space-between;
   align-items: center;
   margin-bottom: 0.75rem;
-  font-weight: 500;
-  color: #333;
+  font-weight: 600;
+  color: #ffffff;
 }
 
 .usage-count {
   font-size: 0.9rem;
-  color: #666;
+  color: #b0b0b0;
 }
 
 .usage-bar {
   width: 100%;
-  height: 8px;
-  background: #f0f0f0;
-  border-radius: 4px;
+  height: 10px;
+  background: rgba(30, 30, 30, 0.8);
+  border-radius: 6px;
   overflow: hidden;
   margin-bottom: 0.75rem;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
 }
 
 .usage-fill {
   height: 100%;
-  background: linear-gradient(90deg, #7ED321 0%, #F5A623 70%, #D0021B 100%);
+  background: linear-gradient(90deg, #667eea 0%, #764ba2 70%, #ef5350 100%);
   transition: width 0.3s ease;
+  box-shadow: 0 0 10px rgba(102, 126, 234, 0.5);
 }
 
 .usage-remaining {
   font-size: 0.9rem;
-  color: #666;
+  color: #b0b0b0;
 }
 
 .usage-exceeded {
-  color: #D0021B;
-  font-weight: 500;
+  color: #ef5350;
+  font-weight: 600;
 }
 
 .usage-loading {
   padding: 1rem;
   text-align: center;
-  color: #666;
+  color: #b0b0b0;
 }
