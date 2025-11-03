@@ -1,0 +1,20 @@
+# Git Secrets 허용 패턴
+# 이 파일의 정규식 패턴들은 git-secrets 스캔에서 제외됩니다.
+
+# AWS 예제 키 (공식 문서에서 사용)
+AKIAIOSFODNN7EXAMPLE
+wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+
+# 테스트용 더미 Account ID
+000000000000
+
+# 예제 플레이스홀더
+xxxxxxxxxxxxxxxxxxxxxxxxxx
+your-api-id
+ap-northeast-2_xxxxxxxxx
+
+# Gemini API 예제
+AIzaSy.*EXAMPLE
+
+# 환경 변수 예제 파일
+\.env\.example

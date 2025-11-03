@@ -1,0 +1,39 @@
+{
+  "version": "2.0",
+  "routeKey": "GET /jobs/{jobId}",
+  "rawPath": "/jobs/job_abc123def456",
+  "requestContext": {
+    "accountId": "000000000000",
+    "apiId": "test-api-id",
+    "domainName": "test.execute-api.us-east-1.amazonaws.com",
+    "domainPrefix": "test",
+    "http": {
+      "method": "GET",
+      "path": "/jobs/job_abc123def456",
+      "protocol": "HTTP/1.1",
+      "sourceIp": "127.0.0.1",
+      "userAgent": "Mozilla/5.0"
+    },
+    "requestId": "test-request-id",
+    "routeKey": "GET /jobs/{jobId}",
+    "stage": "$default",
+    "time": "01/Jan/2024:00:00:00 +0000",
+    "timeEpoch": 1704067200000,
+    "authorizer": {
+      "jwt": {
+        "claims": {
+          "sub": "test-user-123",
+          "email": "test@example.com",
+          "name": "Test User",
+          "cognito:username": "test-user",
+          "email_verified": "true"
+        },
+        "scopes": []
+      }
+    }
+  },
+  "pathParameters": {
+    "jobId": "job_abc123def456"
+  },
+  "isBase64Encoded": false
+}

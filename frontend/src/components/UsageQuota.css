@@ -1,0 +1,52 @@
+.usage-quota {
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 1rem;
+  margin: 1rem 0;
+}
+
+.usage-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+  font-weight: 500;
+  color: #333;
+}
+
+.usage-count {
+  font-size: 0.9rem;
+  color: #666;
+}
+
+.usage-bar {
+  width: 100%;
+  height: 8px;
+  background: #f0f0f0;
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 0.75rem;
+}
+
+.usage-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #7ED321 0%, #F5A623 70%, #D0021B 100%);
+  transition: width 0.3s ease;
+}
+
+.usage-remaining {
+  font-size: 0.9rem;
+  color: #666;
+}
+
+.usage-exceeded {
+  color: #D0021B;
+  font-weight: 500;
+}
+
+.usage-loading {
+  padding: 1rem;
+  text-align: center;
+  color: #666;
+}

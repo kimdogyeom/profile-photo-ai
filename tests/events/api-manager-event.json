@@ -1,0 +1,42 @@
+{
+  "version": "2.0",
+  "routeKey": "POST /generate",
+  "rawPath": "/generate",
+  "rawQueryString": "",
+  "headers": {
+    "content-type": "application/json",
+    "user-agent": "curl/7.64.1"
+  },
+  "requestContext": {
+    "accountId": "000000000000",
+    "apiId": "test-api-id",
+    "domainName": "localhost",
+    "domainPrefix": "test",
+    "http": {
+      "method": "POST",
+      "path": "/generate",
+      "protocol": "HTTP/1.1",
+      "sourceIp": "127.0.0.1",
+      "userAgent": "curl/7.64.1"
+    },
+    "requestId": "test-request-id",
+    "routeKey": "POST /generate",
+    "stage": "dev",
+    "time": "01/Jan/2024:00:00:00 +0000",
+    "timeEpoch": 1704067200000,
+    "authorizer": {
+      "jwt": {
+        "claims": {
+          "sub": "test-user-123",
+          "email": "test@example.com",
+          "name": "Test User",
+          "cognito:username": "test-user-123",
+          "picture": "https://example.com/profile.jpg"
+        },
+        "scopes": []
+      }
+    }
+  },
+  "body": "{\"fileKey\":\"uploads/test-user-123/20240101_abc123.jpg\",\"prompt\":\"Create a professional business profile photo with a clean background, good lighting, and formal attire.\"}",
+  "isBase64Encoded": false
+}

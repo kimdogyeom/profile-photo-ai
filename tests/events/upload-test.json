@@ -1,0 +1,25 @@
+{
+  "body": "{\"fileName\":\"test.jpg\",\"fileSize\":512000,\"contentType\":\"image/jpeg\"}",
+  "resource": "/upload",
+  "path": "/upload",
+  "httpMethod": "POST",
+  "isBase64Encoded": false,
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "requestContext": {
+    "http": {
+      "method": "POST",
+      "path": "/upload"
+    },
+    "authorizer": {
+      "jwt": {
+        "claims": {
+          "sub": "test-user-123",
+          "email": "test@example.com",
+          "name": "Test User"
+        }
+      }
+    }
+  }
+}
