@@ -1,0 +1,123 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv
+.mypy_cache/
+.cache/
+.python-version
+
+# AWS SAM
+*.zip
+.aws-sam/
+samconfig.toml.bak
+packaged.yaml
+samconfig.toml
+
+# Environment variables (⚠️ NEVER commit these files!)
+.env
+.env.local
+.env.production
+.env.development
+.env.*.local
+env.json
+env-local.json
+env-local-host.json
+config/dev.json
+config/prod.json
+
+# Frontend environment files
+frontend/.env
+frontend/.env.local
+frontend/.env.production
+frontend/.env.development
+
+# Node
+node_modules/
+npm-debug.log
+yarn-error.log
+yarn-debug.log*
+.npm
+.eslintcache
+frontend/build/
+frontend/.env
+frontend/.env.local
+build/
+dist/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# GitHub metadata/workflows
+.github/
+
+# Project-level generated / local folders (user requested)
+docs/
+scripts/
+
+# Infrastructure as Code (IaC)
+Makefile
+template.yaml
+docker-compose.yml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Terraform
+*.tfstate
+*.tfstate.backup
+.terraform/
+
+# Secrets
+secrets.json
+*.pem
+*.key
+
+# Logs
+logs/
+*.log
+
+# Coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# LocalStack
+.localstack/
+localstack/
+localstack-data/
+
+# Temporary files
+*.tmp
+tmp/
+temp/
+
+# Documentation (temporary/generated)
+DEPLOYMENT_SUMMARY.md
+WEB_CLIENT_TEST_STATUS.md
+S3_PERMISSION_FIX.md
+PRODUCTION_READY.md
+PROPER_WORKFLOW.md
+COGNITO_AUTH_FIXED.md
+FRONTEND_S3_QUICKSTART.md
+GEMINI_2.5_FLASH_IMAGE_SETUP.md
+GOOGLE_OAUTH_COMPLETE.md
+GOOGLE_OAUTH_SETUP.md
+
+# Test data
+tests/test-data/*.jpg
+tests/test-data/*.png
+tests/test-data/*.jpeg
+tests/test-data/*.webp
+
+# Docker
+docker-compose.override.yml

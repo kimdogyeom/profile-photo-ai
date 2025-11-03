@@ -1,0 +1,92 @@
+.style-selector {
+  margin: 2rem 0;
+}
+
+.style-selector h3 {
+  margin-bottom: 1rem;
+  color: #333;
+  font-size: 1.2rem;
+}
+
+.style-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.style-card {
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 1rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: center;
+  background: white;
+}
+
+.style-card:hover {
+  border-color: #4A90E2;
+  box-shadow: 0 2px 8px rgba(74, 144, 226, 0.2);
+}
+
+.style-card.selected {
+  border-color: #4A90E2;
+  background: #f8fbff;
+  box-shadow: 0 2px 12px rgba(74, 144, 226, 0.3);
+}
+
+.style-icon {
+  font-size: 2rem;
+  margin-bottom: 0.5rem;
+}
+
+.style-name {
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  color: #333;
+}
+
+.style-description {
+  font-size: 0.9rem;
+  color: #666;
+  line-height: 1.4;
+}
+
+.custom-prompt-input {
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  background: #f9f9f9;
+}
+
+.custom-prompt-input label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+  color: #333;
+}
+
+.custom-prompt-input textarea {
+  width: 100%;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 0.75rem;
+  font-family: inherit;
+  resize: vertical;
+  min-height: 100px;
+}
+
+.custom-prompt-input textarea:focus {
+  outline: none;
+  border-color: #4A90E2;
+  box-shadow: 0 0 0 2px rgba(74, 144, 226, 0.2);
+}
+
+.character-count {
+  text-align: right;
+  font-size: 0.8rem;
+  color: #666;
+  margin-top: 0.25rem;
+}

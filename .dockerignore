@@ -1,0 +1,52 @@
+# Git
+.git
+.gitignore
+
+# Build artifacts
+.aws-sam
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info
+dist
+build
+
+# Environment
+.env
+.venv
+venv/
+ENV/
+env/
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+.DS_Store
+
+# LocalStack data
+localstack-data/
+
+# Frontend
+frontend/node_modules
+frontend/build
+frontend/.next
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Tests
+tests/
+*.test.js
+*.spec.js
+
+# Logs
+*.log
+logs/
