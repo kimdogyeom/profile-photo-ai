@@ -3,6 +3,8 @@ import { StyleSelector } from '../components/StyleSelector';
 import { ImageUploader } from '../components/ImageUploader';
 import { UsageQuota } from '../components/UsageQuota';
 import { JobStatus } from '../components/JobStatus';
+import { Logo } from '../components/Logo';
+import { LogOutIcon } from '../components/Icons';
 import { uploadImage, generateImage } from '../services/api';
 import './GeneratePage.css';
 
@@ -66,7 +68,7 @@ export const GeneratePage = ({ onLogout, userInfo }) => {
     <div className="generate-page">
       <header className="page-header">
         <div>
-          <h1>ProfilePhotoAI</h1>
+          <Logo size="large" variant="full" />
           <p>AI로 완벽한 프로필 사진을 만들어보세요</p>
         </div>
         <div className="user-section">
@@ -74,6 +76,7 @@ export const GeneratePage = ({ onLogout, userInfo }) => {
             <span className="user-email">{userInfo.email}</span>
           )}
           <button onClick={onLogout} className="logout-button">
+            <LogOutIcon size={16} color="currentColor" style={{ marginRight: '6px' }} />
             로그아웃
           </button>
         </div>
@@ -115,7 +118,7 @@ export const GeneratePage = ({ onLogout, userInfo }) => {
 
         <div className="sidebar">
           <div className="tips-section">
-            <h3>💡 더 좋은 결과를 위한 팁</h3>
+            <h3>더 좋은 결과를 위한 팁</h3>
             <ul>
               <li>얼굴이 선명하게 보이는 사진을 사용하세요</li>
               <li>조명이 밝고 균일한 사진이 좋습니다</li>
