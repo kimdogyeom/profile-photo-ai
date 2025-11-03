@@ -29,23 +29,44 @@ const config = {
 // Helper functions
 export const getCognitoAuthUrl = (provider) => {
   const { domain, clientId, redirectUri } = config.cognito;
-  const authDomain = domain.includes('amazoncognito.com') 
-    ? domain 
-    : `${domain}.auth.${config.region}.amazoncognito.com`;
   
-  return `https://${authDomain}/oauth2/authorize?` +
+  // Remove any https:// prefix from domain if present
+  const cleanDomain = domain.replace(/^https?:\/\//, '');
+  
+  // Construct auth domain
+  const authDomain = cleanDomain.includes('amazoncognito.com') 
+    ? cleanDomain 
+    : `${cleanDomain}.auth.${config.region}.amazoncognito.com`;
+  
+  const url = `https://${authDomain}/oauth2/authorize?` +
     `client_id=${clientId}&` +
     `response_type=code&` +
     `scope=openid+email+profile&` +
     `redirect_uri=${encodeURIComponent(redirectUri)}&` +
     `identity_provider=${provider}`;
+  
+  console.log('🔐 Google OAuth URL:', {
+    provider,
+    domain,
+    cleanDomain,
+    authDomain,
+    clientId,
+    redirectUri,
+    fullUrl: url
+  });
+  
+  return url;
 };
 
 export const getCognitoLogoutUrl = () => {
   const { domain, clientId } = config.cognito;
-  const authDomain = domain.includes('amazoncognito.com') 
-    ? domain 
-    : `${domain}.auth.${config.region}.amazoncognito.com`;
+  
+  // Remove any https:// prefix from domain if present
+  const cleanDomain = domain.replace(/^https?:\/\//, '');
+  
+  const authDomain = cleanDomain.includes('amazoncognito.com') 
+    ? cleanDomain 
+    : `${cleanDomain}.auth.${config.region}.amazoncognito.com`;
   
   const logoutUri = config.cognito.redirectUri.replace('/callback', '');
   
