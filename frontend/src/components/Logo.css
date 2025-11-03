@@ -1,0 +1,55 @@
+.logo-container {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.logo-icon {
+  flex-shrink: 0;
+  animation: logoGlow 3s ease-in-out infinite;
+}
+
+.logo-text {
+  font-weight: 700;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  white-space: nowrap;
+  letter-spacing: -0.5px;
+}
+
+.logo-icon .sparkles {
+  animation: sparkle 2s ease-in-out infinite;
+}
+
+@keyframes logoGlow {
+  0%, 100% {
+    filter: drop-shadow(0 0 4px rgba(102, 126, 234, 0.4));
+  }
+  50% {
+    filter: drop-shadow(0 0 8px rgba(102, 126, 234, 0.6));
+  }
+}
+
+@keyframes sparkle {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(0.9);
+  }
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .logo-container {
+    gap: 8px;
+  }
+
+  .logo-text {
+    letter-spacing: -0.3px;
+  }
+}
