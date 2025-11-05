@@ -11,22 +11,37 @@ export const CallbackPage = () => {
       const params = new URLSearchParams(window.location.search);
       const code = params.get('code');
       const errorParam = params.get('error');
+      const errorDescription = params.get('error_description');
+
+      console.log('🔍 Callback params:', {
+        code: code ? 'present' : 'missing',
+        error: errorParam,
+        errorDescription,
+        fullUrl: window.location.href
+      });
 
       if (errorParam) {
-        setError(`로그인 실패: ${errorParam}`);
+        const errorMessage = errorDescription 
+          ? `로그인 실패: ${errorParam} - ${decodeURIComponent(errorDescription)}`
+          : `로그인 실패: ${errorParam}`;
+        setError(errorMessage);
         setStatus('error');
+        console.error('❌ OAuth error:', { errorParam, errorDescription });
         return;
       }
 
       if (!code) {
         setError('인증 코드가 없습니다.');
         setStatus('error');
+        console.error('❌ No authorization code found');
         return;
       }
 
       try {
+        console.log('🔄 Exchanging code for tokens...');
         // Exchange code for tokens
         await handleCallback(code);
+        console.log('✅ Token exchange successful');
         setStatus('success');
         
         // Redirect to main page after 1 second
@@ -34,8 +49,8 @@ export const CallbackPage = () => {
           window.location.href = '/';
         }, 1000);
       } catch (err) {
-        console.error('Callback error:', err);
-        setError('로그인 처리 중 오류가 발생했습니다.');
+        console.error('❌ Callback error:', err);
+        setError(`로그인 처리 중 오류: ${err.message || '알 수 없는 오류'}`);
         setStatus('error');
       }
     };
