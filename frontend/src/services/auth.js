@@ -60,7 +60,16 @@ export const logout = () => {
  */
 export const handleCallback = async (code) => {
   try {
-    const tokenEndpoint = `${COGNITO_DOMAIN}/oauth2/token`;
+    // Clean domain (remove https:// if present)
+    const cleanDomain = COGNITO_DOMAIN.replace(/^https?:\/\//, '');
+    const tokenEndpoint = `https://${cleanDomain}/oauth2/token`;
+    
+    console.log('🔐 Token exchange attempt:', {
+      tokenEndpoint,
+      client_id: CLIENT_ID,
+      redirect_uri: REDIRECT_URI,
+      code: code.substring(0, 10) + '...'
+    });
     
     const params = new URLSearchParams({
       grant_type: 'authorization_code',
@@ -78,10 +87,28 @@ export const handleCallback = async (code) => {
     });
 
     if (!response.ok) {
-      throw new Error(`Token exchange failed: ${response.status}`);
+      const errorText = await response.text();
+      console.error('❌ Token exchange failed:', {
+        status: response.status,
+        statusText: response.statusText,
+        body: errorText
+      });
+      
+      let errorMessage = `토큰 교환 실패 (${response.status})`;
+      try {
+        const errorData = JSON.parse(errorText);
+        if (errorData.error) {
+          errorMessage = `${errorData.error}: ${errorData.error_description || ''}`;
+        }
+      } catch (e) {
+        errorMessage += `: ${errorText}`;
+      }
+      
+      throw new Error(errorMessage);
     }
 
     const tokens = await response.json();
+    console.log('✅ Token exchange successful');
     
     // Store tokens
     localStorage.setItem(TOKEN_KEY, tokens.id_token);
@@ -96,7 +123,7 @@ export const handleCallback = async (code) => {
 
     return tokens;
   } catch (error) {
-    console.error('Failed to exchange code for tokens:', error);
+    console.error('❌ Failed to exchange code for tokens:', error);
     throw error;
   }
 };
