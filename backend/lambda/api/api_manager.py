@@ -459,7 +459,7 @@ def extract_user_data(event):
 
 
 def extract_provider(claims):
-    """로그인 제공자 추출 (Google, Kakao 등)"""
+    """로그인 제공자 추출 (Google 등)"""
     identities = claims.get('identities')
     if identities:
         try:
