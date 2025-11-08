@@ -22,7 +22,6 @@ const config = {
   // OAuth Providers
   oauthProviders: {
     google: 'Google',
-    kakao: 'Kakao',
   },
 };
 
