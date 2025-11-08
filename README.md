@@ -2,7 +2,7 @@
 
 AI 기반 프로필/증명사진 생성 서비스
 
-![메인화면](https://github.com/kimdogyeom/profile-photo-ai/tree/main/images/ai_profile_photo_main.png)
+![메인화면](/images/ai_profile_photo_main.png)
 
 ## 사용기술
 
@@ -19,7 +19,7 @@ AI 기반 프로필/증명사진 생성 서비스
 
 ## 아키텍처 상세
 
-![아키텍처](https://github.com/kimdogyeom/profile-photo-ai/tree/main/images/ai_profile_photo_architecture.png)
+![아키텍처](/images/ai_profile_photo_architecture.png)
 
 **주요 플로우:**
 
