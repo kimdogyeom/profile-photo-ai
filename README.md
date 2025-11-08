@@ -2,107 +2,61 @@
 
 AI 기반 프로필/증명사진 생성 서비스
 
-서비스 사진 추가 필요
+![메인화면](https://github.com/kimdogyeom/profile-photo-ai/tree/main/images/ai_profile_photo_main.png)
 
-## 아키텍처
+## 사용기술
 
 - **프론트엔드**: React + S3 Static Hosting + CloudFront
-- **백엔드**: AWS Lambda (Python) + API Gateway
+- **백엔드**: AWS Lambda (Python 3.12) + API Gateway (HTTP API v2)
 - **인증**: AWS Cognito (Google OAuth)
 - **데이터베이스**: DynamoDB
 - **스토리지**: S3
 - **메시지 큐**: SQS
-- **AI**: Google Gemini API
+- **Image Gen AI**: Google Gemini API
+- **보안**: AWS Secrets Manager
 - **모니터링**: CloudWatch Logs & Metrics
 - **IaC**: AWS SAM (Serverless Application Model)
 
-## 프로젝트 구조
+## 아키텍처 상세
 
-```
-profile-photo-ai/
-├── template.yaml            # AWS SAM 템플릿 (인프라 정의)
-├── samconfig.toml          # SAM 설정 파일
-├── backend/                # Lambda 함수 및 백엔드 로직
-│   ├── lambda/
-│   │   ├── file_transfer/  # 파일 업로드 URL 생성
-│   │   ├── api/            # 이미지 생성 요청 처리
-│   │   └── process/        # AI 이미지 처리
-│   └── layers/             # Lambda Layer (공통 라이브러리)
-│       └── dynamodb_helper.py
-├── frontend/               # React 애플리케이션
-├── tests/
-│   └── events/             # Lambda 테스트 이벤트
-├── scripts/
-│   └── local-setup.sh      # 로컬 환경 설정 스크립트
-└── docs/                   # 문서
-```
+![아키텍처](https://github.com/kimdogyeom/profile-photo-ai/tree/main/images/ai_profile_photo_architecture.png)
 
-## 시작하기
+**주요 플로우:**
 
-### 사전 요구사항
+### 1. 파일 업로드 (Direct Upload Pattern)
+1. 사용자가 프론트엔드에서 파일 업로드 요청 (`POST /upload`)
+2. FileTransfer Lambda가 S3 Presigned URL 생성 및 반환
+3. 사용자가 **S3에 직접 업로드** (Lambda를 거치지 않음)
 
-- **Python 3.11+**
-- **Node.js 18+**
-- **AWS CLI**
-- **AWS SAM CLI** 
-- **Docker** (로컬 테스트용)
-- **Gemini API Key**
+### 2. 이미지 생성 요청 (Async Processing)
+4. 사용자가 이미지 생성 요청 (`POST /generate`)
+5. ApiManager Lambda가 사용자 권한 및 일일 쿼터 확인 (DynamoDB UsageLog)
+6. ImageJobs 테이블에 Job 생성 (`status=pending`)
+7. SQS Queue에 작업 메시지 발행
+8. Job 상태 업데이트 (`status=queued`)
+9. **SQS 발행 성공 후에만** 사용량 증가 (DynamoDB UsageLog)
 
-## API 엔드포인트
+### 3. 백그라운드 AI 처리 (SQS Triggered)
+10. SQS 메시지가 ImageProcess Lambda를 트리거
+11. Job 상태 업데이트 (`status=processing`)
+12. S3 Upload Bucket에서 원본 이미지 다운로드
+13. AWS Secrets Manager에서 Gemini API Key 조회
+14. Google Gemini API 호출 (AI 이미지 생성)
+15. 생성된 이미지를 S3 Result Bucket에 업로드
+16. S3 Presigned GET URL 생성 (24시간 유효)
+17. Job 상태 업데이트 (`status=completed`, outputImageUrl 저장)
+18. 사용자 통계 업데이트 (DynamoDB Users - totalImagesGenerated)
 
-### POST /upload
-파일 업로드를 위한 Presigned URL 생성
+### 4. 결과 조회 (Polling)
+19. 사용자가 주기적으로 Job 상태 확인 (`GET /jobs/{jobId}`)
+20. ApiManager Lambda가 DynamoDB ImageJobs 조회
+21. `status=completed`일 경우 Presigned URL 반환
+22. 사용자가 **S3에서 직접 다운로드** (Lambda를 거치지 않음)
 
-**요청:**
-```json
-{
-  "fileName": "profile.jpg",
-  "fileSize": 2048000,
-  "contentType": "image/jpeg"
-}
-```
-
-**응답:**
-```json
-{
-  "uploadUrl": "https://s3.amazonaws.com/...",
-  "fileKey": "uploads/user123/20240101_abc123.jpg",
-  "expiresIn": 3600
-}
-```
-
-### POST /generate
-이미지 생성 요청
-
-**요청:**
-```json
-{
-  "fileKey": "uploads/user123/20240101_abc123.jpg",
-  "prompt": "Create a professional business profile photo with a clean background"
-}
-```
-
-**응답:**
-```json
-{
-  "jobId": "job_abc123def456",
-  "status": "queued",
-  "remainingQuota": 9
-}
-```
-
-### 배포 확인
-
-```bash
-# 스택 정보 확인
-aws cloudformation describe-stacks --stack-name profilephotoai-dev
-
-# API 엔드포인트 확인
-sam list endpoints --stack-name profilephotoai-dev
-
-# 리소스 목록
-sam list resources --stack-name profilephotoai-dev
-```
+### 5. 에러 처리 (DLQ Pattern)
+- Gemini API 호출 실패 시 SQS 자동 재시도 (최대 3회)
+- 3회 실패 후 Dead Letter Queue로 메시지 이동
+- CloudWatch Alarm 트리거 → 운영자 알림
 
 
 ## 모니터링
@@ -117,36 +71,3 @@ sam list resources --stack-name profilephotoai-dev
 - SQS 큐 깊이, 메시지 처리 시간
 - DynamoDB 읽기/쓰기 용량
 - API Gateway 요청 수, 레이턴시
-
-## 아키텍처 상세
-
-Todo 
-아키텍처 사진 추가 필요
-
-**주요 플로우:**
-1. 사용자가 프론트엔드에서 파일 업로드 요청
-2. 백엔드에서 S3 Presigned URL 생성 및 반환
-3. 사용자가 파일을 S3에 업로드
-4. 사용자가 이미지 생성 요청
-5. 백엔드에서 SQS에 작업 큐잉
-6. Image Process Lambda가 SQS 메시지 처리
-7. Gemini API 호출 및 이미지 생성
-8. 생성된 이미지 S3에 저장 및 DynamoDB에 메타데이터 기록
-
-## 개발 가이드
-
-### 코드 위치
-- **File Transfer Lambda**: `backend/lambda/file_transfer/file_transfer.py`
-- **API Manager Lambda**: `backend/lambda/api/api_manager.py`
-- **Image Process Lambda**: `backend/lambda/process/process.py`
-- **DynamoDB Helper**: `backend/layers/dynamodb_helper.py` (Lambda Layer)
-
-### 환경 변수
-
-| 변수명 | 설명 | 필수 |
-|--------|------|------|
-| `GEMINI_API_KEY` | Google Gemini API 키 | ✓ |
-| `UPLOAD_BUCKET` | 업로드 S3 버킷명 | ✓ |
-| `RESULT_BUCKET` | 결과 S3 버킷명 | ✓ |
-| `SQS_QUEUE_URL` | SQS 큐 URL | ✓ |
-| `DAILY_LIMIT` | 일일 생성 한도 | - (기본: 10) |
