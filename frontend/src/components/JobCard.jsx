@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import './JobCard.css';
 
 export const JobCard = ({ job, onRetry }) => {
@@ -11,9 +11,28 @@ export const JobCard = ({ job, onRetry }) => {
     error: jobError
   } = job;
   
+  const [showCompletedBadge, setShowCompletedBadge] = useState(false);
+  const [previousStatus, setPreviousStatus] = useState(status);
+  
   const isLoading = ['pending', 'queued', 'processing'].includes(status);
   const isCompleted = status === 'completed';
   const isFailed = status === 'failed';
+  
+  // 상태가 completed로 변경되었을 때만 뱃지 표시
+  useEffect(() => {
+    if (status === 'completed' && previousStatus !== 'completed') {
+      setShowCompletedBadge(true);
+      
+      // 3초 후 뱃지 숨김
+      const timer = setTimeout(() => {
+        setShowCompletedBadge(false);
+      }, 3000);
+      
+      return () => clearTimeout(timer);
+    }
+    
+    setPreviousStatus(status);
+  }, [status, previousStatus]);
   
   const imageSrc = isCompleted ? outputImageUrl : inputImage;
   
@@ -76,7 +95,7 @@ export const JobCard = ({ job, onRetry }) => {
           </div>
         )}
 
-        {isCompleted && (
+        {showCompletedBadge && (
           <div className="job-card-badge">✨ 완성</div>
         )}
       </div>
@@ -95,12 +114,16 @@ export const JobCard = ({ job, onRetry }) => {
         </div>
         
         {isCompleted && (
-          <button className="download-button" onClick={() => window.open(outputImageUrl)}>
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <button 
+            className="download-button" 
+            onClick={() => window.open(outputImageUrl)}
+            title="다운로드"
+            aria-label="다운로드"
+          >
+            <svg width="20" height="20" viewBox="0 0 16 16" fill="none">
               <path d="M8 11L4 7h2.5V3h3v4H12L8 11z" fill="currentColor"/>
               <path d="M2 13h12v1H2v-1z" fill="currentColor"/>
             </svg>
-            다운로드
           </button>
         )}
       </div>

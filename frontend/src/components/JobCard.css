@@ -186,7 +186,26 @@
   border-radius: 8px;
   backdrop-filter: blur(8px);
   box-shadow: 0 2px 8px rgba(34, 197, 94, 0.3);
-  animation: slideInRight 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  animation: slideInAndFadeOut 3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+@keyframes slideInAndFadeOut {
+  0% {
+    opacity: 0;
+    transform: translateX(20px) scale(0.9);
+  }
+  10% {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+  85% {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(10px) scale(0.95);
+  }
 }
 
 @keyframes slideInRight {
@@ -229,25 +248,28 @@
 .download-button {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 14px;
-  background: #f3f4f6;
-  color: #374151;
-  border: none;
+  justify-content: center;
+  padding: 10px;
+  background: rgba(102, 126, 234, 0.15);
+  color: #667eea;
+  border: 1px solid rgba(102, 126, 234, 0.3);
   border-radius: 8px;
-  font-size: 13px;
-  font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
+  min-width: 40px;
+  min-height: 40px;
 }
 
 .download-button:hover {
-  background: #e5e7eb;
-  transform: translateY(-1px);
+  background: rgba(102, 126, 234, 0.25);
+  border-color: rgba(102, 126, 234, 0.5);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
 }
 
 .download-button:active {
   transform: translateY(0);
+  box-shadow: 0 2px 6px rgba(102, 126, 234, 0.15);
 }
 
 @media (max-width: 768px) {
