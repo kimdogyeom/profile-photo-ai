@@ -72,10 +72,11 @@ export const uploadToS3 = async (uploadUrl, file) => {
   });
 };
 
-export const generateImage = async ({ fileKey, prompt }) => {
+export const generateImage = async ({ fileKey, prompt, style }) => {
   const response = await apiClient.post('/generate', {
     fileKey,
-    prompt
+    prompt,
+    style  // 스타일 정보 포함
   });
   
   return {

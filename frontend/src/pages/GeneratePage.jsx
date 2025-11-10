@@ -42,7 +42,8 @@ export const GeneratePage = ({ onLogout, userInfo }) => {
       // Request image generation
       const response = await generateImage({
         fileKey: fileKey,
-        prompt: generatedPrompt
+        prompt: generatedPrompt,
+        style: selectedStyle  // 선택한 스타일 전달
       });
 
       // Create pending job with preview
