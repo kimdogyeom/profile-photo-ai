@@ -124,3 +124,5 @@ docker-compose.override.yml
 
 # Task Document
 task.md
+backend/lambda/monitoring/stats_aggregator/README.md
+backend/lambda/monitoring/webhook_notifier/README.md
