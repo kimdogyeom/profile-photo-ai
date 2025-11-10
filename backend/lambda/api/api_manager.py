@@ -304,33 +304,45 @@ def handle_get_job(event, context):
         if job.get('status') == 'completed' and job.get('outputImageUrl'):
             result_bucket = os.environ.get('RESULT_BUCKET', 'profilephotoai-results-final-dev')
             output_url = job['outputImageUrl']
+            output_key = None
             
-            # outputImageUrl에서 S3 키 추출
+            # s3://bucket/key 형식
             if output_url.startswith('s3://'):
-                output_key = output_url.split('/', 3)[3]
+                parts = output_url.replace('s3://', '').split('/', 1)
+                if len(parts) == 2:
+                    bucket_from_url = parts[0]
+                    output_key = parts[1]
+                    if bucket_from_url != result_bucket:
+                        result_bucket = bucket_from_url
+            
+            # https://bucket.s3.region.amazonaws.com/key 형식
             elif '.s3.' in output_url or '.s3-' in output_url:
                 output_key = output_url.split('.amazonaws.com/')[-1].split('?')[0]
+            
+            # 이미 키만 있는 경우
             else:
                 output_key = output_url
             
-            try:
-                # Presigned URL 생성 (24시간 유효)
-                presigned_url = s3_client.generate_presigned_url(
-                    'get_object',
-                    Params={
-                        'Bucket': result_bucket,
-                        'Key': output_key
-                    },
-                    ExpiresIn=86400  # 24시간
-                )
-                job['outputImageUrl'] = presigned_url
-                log.info('presigned_url_generated',
-                    jobId=job_id,
-                    key=output_key)
-            except Exception as e:
-                log.warning('presigned_url_generation_failed',
-                    jobId=job_id,
-                    error=str(e))
+            if output_key:
+                try:
+                    # Presigned URL 생성 (24시간 유효)
+                    presigned_url = s3_client.generate_presigned_url(
+                        'get_object',
+                        Params={
+                            'Bucket': result_bucket,
+                            'Key': output_key
+                        },
+                        ExpiresIn=86400  # 24시간
+                    )
+                    job['outputImageUrl'] = presigned_url
+                    log.info('presigned_url_generated',
+                        jobId=job_id,
+                        key=output_key)
+                except Exception as e:
+                    log.warning('presigned_url_generation_failed',
+                        jobId=job_id,
+                        error=str(e))
+                    job['outputImageUrl'] = None
         
         # 응답 반환
         return cors_response(200, job)
@@ -418,30 +430,44 @@ def handle_get_user_jobs(event, context):
             if job.get('status') == 'completed' and job.get('outputImageUrl'):
                 # outputImageUrl에서 S3 키 추출
                 output_url = job['outputImageUrl']
-                # https://bucket.s3.region.amazonaws.com/key 또는 s3://bucket/key 형식
+                output_key = None
+                
+                # s3://bucket/key 형식
                 if output_url.startswith('s3://'):
-                    output_key = output_url.split('/', 3)[3]
+                    # s3://profilephotoai-results-final-dev/generated/userId/jobId.png
+                    parts = output_url.replace('s3://', '').split('/', 1)
+                    if len(parts) == 2:
+                        bucket_from_url = parts[0]
+                        output_key = parts[1]
+                        # 버킷 이름이 다르면 업데이트
+                        if bucket_from_url != result_bucket:
+                            result_bucket = bucket_from_url
+                
+                # https://bucket.s3.region.amazonaws.com/key 형식
                 elif '.s3.' in output_url or '.s3-' in output_url:
-                    # https URL에서 키 추출
                     output_key = output_url.split('.amazonaws.com/')[-1].split('?')[0]
+                
+                # 이미 키만 있는 경우
                 else:
-                    # 이미 키만 있는 경우
                     output_key = output_url
                 
-                try:
-                    # Presigned URL 생성 (24시간 유효)
-                    presigned_url = s3_client.generate_presigned_url(
-                        'get_object',
-                        Params={
-                            'Bucket': result_bucket,
-                            'Key': output_key
-                        },
-                        ExpiresIn=86400  # 24시간
-                    )
-                    job['outputImageUrl'] = presigned_url
-                except Exception as e:
-                    print(f"Failed to generate presigned URL for job {job.get('jobId')}: {e}")
-                    # 에러 발생 시 원본 URL 유지
+                if output_key:
+                    try:
+                        # Presigned URL 생성 (24시간 유효)
+                        presigned_url = s3_client.generate_presigned_url(
+                            'get_object',
+                            Params={
+                                'Bucket': result_bucket,
+                                'Key': output_key
+                            },
+                            ExpiresIn=86400  # 24시간
+                        )
+                        job['outputImageUrl'] = presigned_url
+                        print(f"Generated presigned URL for job {job.get('jobId')}: {output_key}")
+                    except Exception as e:
+                        print(f"Failed to generate presigned URL for job {job.get('jobId')}: {e}")
+                        # 에러 발생 시 None으로 설정하여 프론트엔드에서 처리
+                        job['outputImageUrl'] = None
         
         # 응답 구성
         response = {
