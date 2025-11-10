@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { StyleSelector } from '../components/StyleSelector';
 import { ImageUploader } from '../components/ImageUploader';
 import { UsageQuota } from '../components/UsageQuota';
-import { JobStatus } from '../components/JobStatus';
+import { JobHistoryList } from '../components/JobHistoryList';
 import { Logo } from '../components/Logo';
 import { LogOutIcon } from '../components/Icons';
 import { uploadImage, generateImage } from '../services/api';
@@ -13,7 +13,7 @@ export const GeneratePage = ({ onLogout, userInfo }) => {
   const [selectedStyle, setSelectedStyle] = useState('professional');
   const [generatedPrompt, setGeneratedPrompt] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [jobId, setJobId] = useState(null);
+  const [pendingJobs, setPendingJobs] = useState([]);
   const [error, setError] = useState(null);
 
   const handleStyleChange = ({ styleId, prompt }) => {
@@ -45,7 +45,22 @@ export const GeneratePage = ({ onLogout, userInfo }) => {
         prompt: generatedPrompt
       });
 
-      setJobId(response.jobId);
+      // Create pending job with preview
+      const inputImageUrl = URL.createObjectURL(selectedFile);
+      const newPendingJob = {
+        jobId: response.jobId,
+        status: 'pending',
+        style: selectedStyle,
+        inputImage: inputImageUrl,
+        outputImageUrl: null,
+        createdAt: new Date().toISOString(),
+        prompt: generatedPrompt
+      };
+
+      setPendingJobs(prev => [newPendingJob, ...prev]);
+      
+      // Keep the selected file for potential retry
+      // setSelectedFile(null); // Removed to persist input image
       
     } catch (error) {
       console.error('Image generation failed:', error);
@@ -62,7 +77,11 @@ export const GeneratePage = ({ onLogout, userInfo }) => {
     }
   };
 
-  const canGenerate = selectedFile && generatedPrompt && !isLoading && !jobId;
+  const handleJobComplete = (completedJob) => {
+    setPendingJobs(prev => prev.filter(job => job.jobId !== completedJob.jobId));
+  };
+
+  const canGenerate = selectedFile && generatedPrompt && !isLoading;
 
   return (
     <div className="generate-page">
@@ -83,6 +102,13 @@ export const GeneratePage = ({ onLogout, userInfo }) => {
       </header>
 
       <div className="page-content">
+        <div className="history-section">
+          <JobHistoryList 
+            pendingJobs={pendingJobs}
+            onJobComplete={handleJobComplete}
+          />
+        </div>
+
         <div className="main-section">
           <UsageQuota />
           
@@ -111,20 +137,6 @@ export const GeneratePage = ({ onLogout, userInfo }) => {
             >
               {isLoading ? '업로드 중...' : '프로필 사진 생성'}
             </button>
-          </div>
-          
-          {jobId && <JobStatus jobId={jobId} />}
-        </div>
-
-        <div className="sidebar">
-          <div className="tips-section">
-            <h3>더 좋은 결과를 위한 팁</h3>
-            <ul>
-              <li>얼굴이 선명하게 보이는 사진을 사용하세요</li>
-              <li>조명이 밝고 균일한 사진이 좋습니다</li>
-              <li>정면을 바라보는 사진을 권장합니다</li>
-              <li>배경이 복잡하지 않은 사진이 효과적입니다</li>
-            </ul>
           </div>
         </div>
       </div>
