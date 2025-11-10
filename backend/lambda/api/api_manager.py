@@ -83,7 +83,7 @@ def lambda_handler(event, context):
 
 def handle_generate_image(event, context):
     """이미지 생성 요청 처리 (POST /generate)"""
-    log = StructuredLogger('ApiManagerFunction', context.request_id)
+    log = StructuredLogger('ApiManagerFunction', context.aws_request_id)
     start_time = time.time()
     
     try:
@@ -256,7 +256,7 @@ def handle_generate_image(event, context):
 
 def handle_get_job(event, context):
     """Job 상태 조회 (GET /jobs/{jobId})"""
-    log = StructuredLogger('ApiManagerFunction', context.request_id)
+    log = StructuredLogger('ApiManagerFunction', context.aws_request_id)
     
     try:
         # 사용자 ID 추출

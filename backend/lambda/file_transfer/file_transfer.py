@@ -54,7 +54,7 @@ def lambda_handler(event, context):
     }
     """
     # 로거 초기화
-    log = StructuredLogger('FileTransferFunction', context.request_id)
+    log = StructuredLogger('FileTransferFunction', context.aws_request_id)
     request_start_time = time.time()
     
     try:
