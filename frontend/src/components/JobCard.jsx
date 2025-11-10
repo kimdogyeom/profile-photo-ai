@@ -2,7 +2,14 @@ import React from 'react';
 import './JobCard.css';
 
 export const JobCard = ({ job, onRetry }) => {
-  const { jobId, status, inputImage, outputImageUrl, style, createdAt, error } = job;
+  const {
+    status,
+    style,
+    inputImage,
+    outputImageUrl,
+    createdAt,
+    error: jobError
+  } = job;
   
   const isLoading = ['pending', 'queued', 'processing'].includes(status);
   const isCompleted = status === 'completed';
@@ -59,7 +66,7 @@ export const JobCard = ({ job, onRetry }) => {
         {isFailed && (
           <div className="job-card-overlay error">
             <div className="error-icon">⚠️</div>
-            <p className="error-text">{error || '이미지 생성에 실패했습니다'}</p>
+            <p className="error-text">{jobError || '이미지 생성에 실패했습니다'}</p>
             <button 
               className="retry-button"
               onClick={() => onRetry?.(job)}
