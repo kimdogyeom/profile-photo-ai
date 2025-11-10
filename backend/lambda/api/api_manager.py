@@ -104,11 +104,13 @@ def handle_generate_image(event, context):
         
         file_key = body.get('fileKey')
         prompt = body.get('prompt', '')
+        style = body.get('style', 'custom')  # 프론트엔드에서 선택한 스타일
         
         # Job 생성 요청 로깅
         log.info('job_create_request',
             userId=user_id,
             fileKey=file_key,
+            style=style,
             promptLength=len(prompt))
         
         # 입력 검증
@@ -158,7 +160,7 @@ def handle_generate_image(event, context):
         # ImageJob 생성
         job_id = ImageJobService.create_job(
             user_id=user_id,
-            style='custom',  # 클라이언트에서 프롬프트 관리
+            style=style,  # 프론트엔드에서 선택한 스타일 사용
             input_url=s3_uri,
             prompt=prompt
         )
@@ -166,6 +168,7 @@ def handle_generate_image(event, context):
         log.info('job_created',
             jobId=job_id,
             userId=user_id,
+            style=style,
             inputUrl=s3_uri)
         
         # SQS 메시지 발행
@@ -174,7 +177,7 @@ def handle_generate_image(event, context):
             'userId': user_id,
             's3_uri': s3_uri,
             'prompt': prompt,
-            'style': 'custom',
+            'style': style,  # 스타일 정보 포함
             'createdAt': datetime.utcnow().isoformat()
         }
         
