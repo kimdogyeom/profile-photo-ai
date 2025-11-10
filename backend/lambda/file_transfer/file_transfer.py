@@ -1,8 +1,14 @@
 import boto3
 import json
 import os
+import sys
 import uuid
 from datetime import datetime
+import time
+
+# Lambda Layer import
+sys.path.append('/opt/python')
+from logging_helper import StructuredLogger
 
 # AWS 클라이언트 초기화 (LocalStack 지원)
 endpoint_url = os.environ.get('AWS_ENDPOINT_URL')
@@ -47,26 +53,46 @@ def lambda_handler(event, context):
         "expiresIn": 3600
     }
     """
+    # 로거 초기화
+    log = StructuredLogger('FileTransferFunction', context.request_id)
+    request_start_time = time.time()
+    
     try:
         # Cognito 사용자 ID 추출
         user_id = extract_user_id(event)
         if not user_id:
+            log.error('user_id_not_found',
+                requestContext=event.get('requestContext', {}))
             return error_response(401, "Unauthorized: User ID not found")
-        
-        print(f"File upload request from user: {user_id}")
         
         # 요청 본문 파싱
         body = parse_request_body(event)
         if not body:
+            log.error('invalid_request_body',
+                userId=user_id,
+                body=event.get('body', '')[:100])  # 처음 100자만 로깅
             return error_response(400, "Invalid request body")
         
         file_name = body.get('fileName')
         content_type = body.get('contentType')
         file_size = body.get('fileSize', 0)
         
+        # 업로드 요청 로깅
+        log.info('upload_request',
+            userId=user_id,
+            fileName=file_name,
+            contentType=content_type,
+            fileSize=file_size)
+        
         # 입력 검증
         validation_error = validate_upload_request(file_name, content_type, file_size)
         if validation_error:
+            log.warning('validation_failed',
+                userId=user_id,
+                fileName=file_name,
+                contentType=content_type,
+                fileSize=file_size,
+                reason=validation_error)
             return error_response(400, validation_error)
         
         # 파일 확장자 추출
@@ -83,7 +109,16 @@ def lambda_handler(event, context):
             expiration=PRESIGNED_URL_EXPIRATION
         )
         
-        print(f"Generated presigned URL for user {user_id}: s3://{UPLOAD_BUCKET}/{file_key}")
+        # 처리 시간 계산
+        processing_time = (time.time() - request_start_time) * 1000  # ms
+        
+        # 성공 로깅
+        log.info('presigned_url_created',
+            userId=user_id,
+            fileKey=file_key,
+            bucket=UPLOAD_BUCKET,
+            expiresIn=PRESIGNED_URL_EXPIRATION,
+            processingTime=processing_time)
         
         # 성공 응답
         return {
@@ -103,7 +138,9 @@ def lambda_handler(event, context):
         }
         
     except Exception as e:
-        print(f"Error generating presigned URL: {e}")
+        log.error('presigned_url_failed',
+            error=e,
+            userId=user_id if 'user_id' in locals() else None)
         return error_response(500, f"Internal server error: {str(e)}")
 
 

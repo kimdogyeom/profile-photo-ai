@@ -3,6 +3,7 @@ import os
 import json
 import sys
 import time
+import resource
 from urllib.parse import urlparse
 from google import genai
 from google.genai import types
@@ -10,9 +11,10 @@ from PIL import Image
 from io import BytesIO
 from datetime import datetime
 
-# Lambda Layer에서 dynamodb_helper 임포트
+# Lambda Layer에서 dynamodb_helper 및 logging_helper 임포트
 sys.path.append('/opt/python')
 from dynamodb_helper import ImageJobService, UserService
+from logging_helper import StructuredLogger
 
 # AWS 클라이언트 초기화 (LocalStack 지원)
 endpoint_url = os.environ.get('AWS_ENDPOINT_URL')
@@ -71,6 +73,7 @@ def lambda_handler(event, context):
     SQS 메시지를 처리하여 Gemini API로 이미지를 생성하고 결과를 S3에 저장합니다.
     DynamoDB에 작업 상태를 업데이트하고, WebSocket이 있으면 실시간 알림을 전송합니다.
     """
+    log = StructuredLogger('ImageProcessFunction', context.request_id)
     processed_count = 0
     failed_count = 0
     
@@ -89,7 +92,11 @@ def lambda_handler(event, context):
             style = message_body.get('style', 'professional')
             connection_id = message_body.get('connectionId')  # WebSocket (선택적)
 
-            print(f"Processing job {job_id} for user {user_id}")
+            log.info('job_processing_started',
+                jobId=job_id,
+                userId=user_id,
+                style=style,
+                s3Uri=s3_uri)
 
             # 필수 데이터 검증
             if not all([job_id, user_id, s3_uri, prompt]):
@@ -103,13 +110,23 @@ def lambda_handler(event, context):
             input_bucket = parsed_uri.netloc
             input_key = parsed_uri.path.lstrip('/')
 
-            print(f"Downloading input image from s3://{input_bucket}/{input_key}")
+            download_start = time.time()
             response = s3_client.get_object(Bucket=input_bucket, Key=input_key)
             input_image_bytes = response['Body'].read()
             input_image = Image.open(BytesIO(input_image_bytes))
+            download_time = (time.time() - download_start) * 1000
+
+            log.info('image_downloaded',
+                jobId=job_id,
+                fileSize=len(input_image_bytes),
+                downloadTime=download_time,
+                imageSize=f"{input_image.width}x{input_image.height}")
 
             # 2. Gemini 2.5 Flash Image API로 이미지 생성 요청 (google-genai)
-            print(f"Generating image with Gemini 2.5 Flash Image. Prompt: {prompt[:100]}...")
+            log.info('gemini_api_request',
+                jobId=job_id,
+                promptLength=len(prompt),
+                modelName=MODEL_NAME)
             
             generation_start = time.time()
             
@@ -132,8 +149,14 @@ def lambda_handler(event, context):
                 ]
             )
             
-            generation_time = time.time() - generation_start
-            print(f"API response received in {generation_time:.2f}s")
+            generation_time = (time.time() - generation_start) * 1000
+            
+            # 느린 응답 경고
+            if generation_time > 30000:  # 30초 초과
+                log.warning('gemini_api_slow_response',
+                    jobId=job_id,
+                    responseTime=generation_time,
+                    threshold=30000)
 
             # 응답 검증
             if not response.candidates:
@@ -144,9 +167,11 @@ def lambda_handler(event, context):
             # finish_reason 확인
             if hasattr(candidate, 'finish_reason'):
                 finish_reason = str(candidate.finish_reason)
-                print(f"Finish reason: {finish_reason}")
                 if 'STOP' not in finish_reason.upper() and finish_reason != '1':
-                    print(f"Warning: Unexpected finish_reason: {finish_reason}")
+                    log.warning('unexpected_finish_reason',
+                        jobId=job_id,
+                        finishReason=finish_reason)
+            
             
             # 응답에서 생성된 이미지 데이터 추출
             generated_image_bytes = None
@@ -157,24 +182,35 @@ def lambda_handler(event, context):
                     if hasattr(part, 'inline_data') and part.inline_data:
                         generated_image_bytes = part.inline_data.data
                         mime_type = getattr(part.inline_data, 'mime_type', 'unknown')
-                        print(f"Found generated image: {mime_type}, {len(generated_image_bytes)} bytes")
+                        log.info('gemini_api_success',
+                            jobId=job_id,
+                            responseTime=generation_time,
+                            mimeType=mime_type,
+                            imageSize=len(generated_image_bytes))
                         break
                     # text 응답인 경우 (설명만 생성된 경우)
                     elif hasattr(part, 'text') and part.text:
-                        print(f"Warning: Received text response: {part.text[:200]}")
+                        log.warning('gemini_text_response',
+                            jobId=job_id,
+                            textPreview=part.text[:200])
 
             if not generated_image_bytes:
-                # 응답 구조 디버깅
-                print(f"Response structure: {response}")
-                print(f"Candidate: {candidate}")
-                if hasattr(candidate, 'content'):
-                    print(f"Content: {candidate.content}")
-                raise Exception("Image generation failed: no image data in response. Model may not support image generation.")
+                error_msg = "Image generation failed: no image data in response"
+                log.error('gemini_api_error',
+                    jobId=job_id,
+                    error=error_msg,
+                    responseStructure=str(candidate)[:500])
+                raise Exception(error_msg)
 
-            print(f"Image generated successfully in {generation_time:.2f}s, size: {len(generated_image_bytes)} bytes")
+            log.info('image_generated',
+                jobId=job_id,
+                generationTime=generation_time,
+                outputSize=len(generated_image_bytes))
 
             # 3. 생성된 이미지를 결과 S3 버킷에 업로드
             output_key = f"generated/{user_id}/{job_id}.png"
+            upload_start = time.time()
+            
             s3_client.put_object(
                 Bucket=RESULT_BUCKET,
                 Key=output_key,
@@ -189,11 +225,17 @@ def lambda_handler(event, context):
                 }
             )
             
+            upload_time = (time.time() - upload_start) * 1000
             output_s3_uri = f"s3://{RESULT_BUCKET}/{output_key}"
-            print(f"Uploaded result to {output_s3_uri}")
+            
+            log.info('s3_upload_success',
+                jobId=job_id,
+                s3Uri=output_s3_uri,
+                uploadTime=upload_time,
+                fileSize=len(generated_image_bytes))
 
             # 5. DynamoDB에 작업 완료 상태 업데이트 (S3 URI만 저장)
-            processing_time = time.time() - start_time
+            processing_time = (time.time() - start_time) * 1000
             ImageJobService.update_job_status(
                 job_id=job_id,
                 status='completed',
@@ -209,8 +251,19 @@ def lambda_handler(event, context):
 
             # 6. 사용자 통계 업데이트
             UserService.increment_total_images(user_id)
-
-            print(f"Job {job_id} completed successfully in {processing_time:.2f}s")
+            
+            # 메모리 사용량 추적
+            memory_used = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024  # MB
+            
+            log.info('job_completed',
+                jobId=job_id,
+                userId=user_id,
+                processingTime=processing_time,
+                generationTime=generation_time,
+                downloadTime=download_time,
+                uploadTime=upload_time,
+                memoryUsed=memory_used,
+                outputSize=len(generated_image_bytes))
 
             # 7. WebSocket으로 결과 전송 (연결이 있는 경우)
             if connection_id and api_gateway_client:
@@ -219,32 +272,51 @@ def lambda_handler(event, context):
                         'type': 'image_completed',
                         'jobId': job_id,
                         'status': 'completed',
-                        'imageUrl': presigned_url,
+                        's3Uri': output_s3_uri,
                         'processingTime': processing_time
                     }
                     api_gateway_client.post_to_connection(
                         ConnectionId=connection_id,
                         Data=json.dumps(notification_data).encode('utf-8')
                     )
-                    print(f"Sent completion notification to connection {connection_id}")
+                    log.info('websocket_notification_sent',
+                        jobId=job_id,
+                        connectionId=connection_id,
+                        notificationType='image_completed')
                 except Exception as ws_error:
-                    print(f"Failed to send WebSocket notification: {ws_error}")
-                    # WebSocket 실패는 치명적이지 않으므로 계속 진행
+                    log.warning('websocket_notification_failed',
+                        jobId=job_id,
+                        connectionId=connection_id,
+                        error=str(ws_error))
 
             processed_count += 1
 
         except Exception as e:
             failed_count += 1
             error_message = str(e)
-            print(f"Error processing job {job_id}: {error_message}")
             
             import traceback
-            traceback.print_exc()
+            error_traceback = traceback.format_exc()
+            
+            # 메모리 사용량 추적 (에러 시에도)
+            try:
+                memory_used = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+            except:
+                memory_used = None
+            
+            log.error('job_failed',
+                jobId=job_id,
+                userId=user_id,
+                error=error_message,
+                errorType=type(e).__name__,
+                processingTime=(time.time() - start_time) * 1000 if start_time else None,
+                memoryUsed=memory_used,
+                traceback=error_traceback[:500])
 
             # DynamoDB에 실패 상태 기록
             if job_id:
                 try:
-                    processing_time = time.time() - start_time
+                    processing_time = (time.time() - start_time) * 1000
                     ImageJobService.update_job_status(
                         job_id=job_id,
                         status='failed',
@@ -252,7 +324,10 @@ def lambda_handler(event, context):
                         processing_time=processing_time
                     )
                 except Exception as db_error:
-                    print(f"Failed to update job status in DynamoDB: {db_error}")
+                    log.error('dynamodb_update_failed',
+                        jobId=job_id,
+                        error=str(db_error),
+                        errorType=type(db_error).__name__)
 
             # WebSocket으로 에러 메시지 전송 (연결이 있는 경우)
             if 'connection_id' in locals() and connection_id and api_gateway_client:
@@ -267,11 +342,19 @@ def lambda_handler(event, context):
                         ConnectionId=connection_id,
                         Data=json.dumps(error_notification).encode('utf-8')
                     )
+                    log.info('websocket_error_notification_sent',
+                        jobId=job_id,
+                        connectionId=connection_id)
                 except Exception as api_error:
-                    print(f"Failed to send error notification via WebSocket: {api_error}")
+                    log.warning('websocket_error_notification_failed',
+                        jobId=job_id,
+                        error=str(api_error))
 
-    # 최종 결과 반환
-    print(f"Batch processing complete. Processed: {processed_count}, Failed: {failed_count}")
+    # 최종 배치 처리 결과
+    log.info('batch_processing_complete',
+        totalRecords=len(event['Records']),
+        processedCount=processed_count,
+        failedCount=failed_count)
     
     return {
         'statusCode': 200,
