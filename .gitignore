@@ -121,3 +121,6 @@ tests/test-data/*.webp
 
 # Docker
 docker-compose.override.yml
+
+# Task Document
+task.md
