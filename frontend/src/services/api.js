@@ -105,3 +105,16 @@ export const getUserInfo = async () => {
   const response = await apiClient.get('/user/me');
   return response.data;
 };
+
+export const getUserJobs = async (limit = 50, nextToken = null) => {
+  const params = { limit };
+  if (nextToken) {
+    params.nextToken = nextToken;
+  }
+  
+  const response = await apiClient.get('/user/jobs', { params });
+  return {
+    jobs: response.data.jobs || [],
+    nextToken: response.data.nextToken || null
+  };
+};
