@@ -271,6 +271,8 @@ jobs:
   rollback:
     name: Rollback on Failure
     needs: [deploy-backend, deploy-frontend]
+    environment:
+      name: production
     if: failure()
     runs-on: ubuntu-latest
     permissions:
