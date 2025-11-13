@@ -3,11 +3,11 @@
     {
       "EventSource": "aws:sns",
       "EventVersion": "1.0",
-      "EventSubscriptionArn": "arn:aws:sns:ap-northeast-2:123456789012:ProfilePhotoAI-AlarmNotifications-dev:12345678-1234-1234-1234-123456789012",
+      "EventSubscriptionArn": "arn:aws:sns:ap-northeast-2:123456789012:Profile-Photo-AI-AlarmNotifications-dev:12345678-1234-1234-1234-123456789012",
       "Sns": {
         "Type": "Notification",
         "MessageId": "12345678-1234-1234-1234-123456789012",
-        "TopicArn": "arn:aws:sns:ap-northeast-2:123456789012:ProfilePhotoAI-AlarmNotifications-dev",
+        "TopicArn": "arn:aws:sns:ap-northeast-2:123456789012:Profile-Photo-AI-AlarmNotifications-dev",
         "Subject": "ALARM: \"dev-Lambda-Errors\" in Asia Pacific (Seoul)",
         "Message": "{\"AlarmName\":\"dev-Lambda-Errors\",\"AlarmDescription\":\"Lambda function error rate exceeded threshold\",\"AWSAccountId\":\"123456789012\",\"AlarmConfigurationUpdatedTimestamp\":\"2025-01-10T10:00:00.000+0000\",\"NewStateValue\":\"ALARM\",\"NewStateReason\":\"Threshold Crossed: 1 datapoint [5.0] was greater than the threshold (3.0).\",\"StateChangeTime\":\"2025-01-10T12:00:00.000+0000\",\"Region\":\"Asia Pacific (Seoul)\",\"AlarmArn\":\"arn:aws:cloudwatch:ap-northeast-2:123456789012:alarm:dev-Lambda-Errors\",\"OldStateValue\":\"OK\",\"Trigger\":{\"MetricName\":\"Errors\",\"Namespace\":\"AWS/Lambda\",\"StatisticType\":\"Statistic\",\"Statistic\":\"SUM\",\"Unit\":null,\"Dimensions\":[{\"value\":\"ProfilePhotoAI-ImageProcess-dev\",\"name\":\"FunctionName\"}],\"Period\":300,\"EvaluationPeriods\":1,\"ComparisonOperator\":\"GreaterThanThreshold\",\"Threshold\":3.0,\"TreatMissingData\":\"notBreaching\",\"EvaluateLowSampleCountPercentile\":\"\"}}",
         "Timestamp": "2025-01-10T12:00:00.000Z",

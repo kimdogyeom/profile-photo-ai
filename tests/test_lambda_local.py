@@ -15,8 +15,8 @@ sys.path.insert(0, str(project_root / '.aws-sam' / 'build' / 'ApiManagerFunction
 sys.path.insert(0, str(project_root / '.aws-sam' / 'build' / 'DynamoDBHelperLayer' / 'python'))
 
 # 환경 변수 설정
-os.environ['UPLOAD_BUCKET'] = 'profilephotoai-uploads-raw-dev'
-os.environ['RESULT_BUCKET'] = 'profilephotoai-results-final-dev'
+os.environ['UPLOAD_BUCKET'] = 'profile-photo-ai-uploads-raw-dev'
+os.environ['RESULT_BUCKET'] = 'profile-photo-ai-results-final-dev'
 os.environ['PRESIGNED_URL_EXPIRATION'] = '3600'
 os.environ['AWS_DEFAULT_REGION'] = 'ap-northeast-2'
 

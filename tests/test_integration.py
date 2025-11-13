@@ -103,7 +103,7 @@ def test_3_1_presigned_url():
             # 3. S3에서 파일 확인
             print("\n3️⃣ LocalStack S3에서 파일 확인...")
             try:
-                bucket_name = data.get('bucket', 'profilephotoai-uploads-raw-dev')
+                bucket_name = data.get('bucket', 'profile-photo-ai-uploads-raw-dev')
                 obj = s3_client.head_object(Bucket=bucket_name, Key=file_key)
                 print(f"   ✓ 파일 크기: {obj['ContentLength']} bytes")
                 print(f"   ✓ Content-Type: {obj.get('ContentType')}")
@@ -161,7 +161,7 @@ def test_3_2_image_generation(file_key):
             # 2. SQS 메시지 확인
             print("\n2️⃣ SQS 메시지 확인...")
             try:
-                queue_url = f"{LOCALSTACK_ENDPOINT}/000000000000/ProfilePhotoAI-ImageProcess-dev"
+                queue_url = f"{LOCALSTACK_ENDPOINT}/000000000000/Profile-Photo-AI-ImageProcess-dev"
                 messages = sqs_client.receive_message(
                     QueueUrl=queue_url,
                     MaxNumberOfMessages=1,
@@ -201,7 +201,7 @@ def test_3_3_dynamodb_data(job_id=None):
     try:
         # 1. Users 테이블 확인
         print("\n1️⃣ Users 테이블 확인...")
-        users_table = dynamodb.Table('ProfilePhotoAI-Users-dev')
+        users_table = dynamodb.Table('Profile-Photo-AI-Users-dev')
         try:
             response = users_table.scan(Limit=5)
             user_count = response.get('Count', 0)
@@ -215,7 +215,7 @@ def test_3_3_dynamodb_data(job_id=None):
         
         # 2. UsageLog 테이블 확인
         print("\n2️⃣ UsageLog 테이블 확인...")
-        usage_table = dynamodb.Table('ProfilePhotoAI-UsageLog-dev')
+        usage_table = dynamodb.Table('Profile-Photo-AI-UsageLog-dev')
         try:
             response = usage_table.scan(Limit=5)
             log_count = response.get('Count', 0)
@@ -230,7 +230,7 @@ def test_3_3_dynamodb_data(job_id=None):
         
         # 3. ImageJobs 테이블 확인
         print("\n3️⃣ ImageJobs 테이블 확인...")
-        jobs_table = dynamodb.Table('ProfilePhotoAI-ImageJobs-dev')
+        jobs_table = dynamodb.Table('Profile-Photo-AI-ImageJobs-dev')
         try:
             response = jobs_table.scan(Limit=10)
             job_count = response.get('Count', 0)

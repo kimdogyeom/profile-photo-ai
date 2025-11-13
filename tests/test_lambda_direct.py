@@ -14,14 +14,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'backend', 'lam
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'backend', 'layers'))
 
 # 환경 변수 설정
-os.environ['UPLOAD_BUCKET'] = 'profilephotoai-uploads-raw-dev'
-os.environ['RESULT_BUCKET'] = 'profilephotoai-results-final-dev'
+os.environ['UPLOAD_BUCKET'] = 'profile-photo-ai-uploads-raw-dev'
+os.environ['RESULT_BUCKET'] = 'profile-photo-ai-results-final-dev'
 os.environ['PRESIGNED_URL_EXPIRATION'] = '3600'
 os.environ['AWS_DEFAULT_REGION'] = 'ap-northeast-2'
-os.environ['ProfilePhotoAI-Users-Table'] = 'ProfilePhotoAI-Users-dev'
-os.environ['ProfilePhotoAI-UsageLog-Table'] = 'ProfilePhotoAI-UsageLog-dev'
-os.environ['ProfilePhotoAI-ImageJobs-Table'] = 'ProfilePhotoAI-ImageJobs-dev'
-os.environ['SQS_QUEUE_URL'] = 'http://localhost:4566/000000000000/ProfilePhotoAI-ImageProcess-dev'
+os.environ['Profile-Photo-AI-Users-Table'] = 'Profile-Photo-AI-Users-dev'
+os.environ['Profile-Photo-AI-UsageLog-Table'] = 'Profile-Photo-AI-UsageLog-dev'
+os.environ['Profile-Photo-AI-ImageJobs-Table'] = 'Profile-Photo-AI-ImageJobs-dev'
+os.environ['SQS_QUEUE_URL'] = 'http://localhost:4566/000000000000/Profile-Photo-AI-ImageProcess-dev'
 os.environ['DAILY_LIMIT'] = '10'
 
 # LocalStack 사용 (선택적)

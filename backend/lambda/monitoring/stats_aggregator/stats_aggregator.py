@@ -14,7 +14,7 @@ logs_client = boto3.client('logs')
 cloudwatch_client = boto3.client('cloudwatch')
 
 ENVIRONMENT = os.environ.get('ENVIRONMENT', 'dev')
-LOG_GROUP_NAME = f'/aws/lambda/ProfilePhotoAI-ImageProcess-{ENVIRONMENT}'
+LOG_GROUP_NAME = f'/aws/lambda/Profile-Photo-AI-ImageProcess-{ENVIRONMENT}'
 NAMESPACE = f'ProfilePhotoAI/{ENVIRONMENT}/Statistics'
 
 
