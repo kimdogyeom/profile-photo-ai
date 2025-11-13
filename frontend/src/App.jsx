@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { ToastContainer } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
 import { GeneratePage } from './pages/GeneratePage';
 import { CallbackPage } from './pages/CallbackPage';
 import AuthModal from './components/auth/AuthModal';
@@ -38,6 +40,19 @@ function App() {
   return (
     <Router>
       <div className="App">
+        <ToastContainer
+          position="top-center"
+          autoClose={3000}
+          hideProgressBar={false}
+          newestOnTop
+          closeOnClick
+          rtl={false}
+          pauseOnFocusLoss
+          draggable
+          pauseOnHover
+          theme="dark"
+          style={{ zIndex: 9999 }}
+        />
         <Routes>
           <Route path="/callback" element={<CallbackPage />} />
           <Route 
