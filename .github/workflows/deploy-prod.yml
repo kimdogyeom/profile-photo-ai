@@ -21,6 +21,8 @@ jobs:
     name: Validate Deployment
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch'
+    environment:
+      name: production
     
     steps:
       - name: Check confirmation
@@ -34,6 +36,8 @@ jobs:
   test:
     name: Run Full Test Suite
     runs-on: ubuntu-latest
+    environment:
+      name: production
     
     steps:
       - name: Checkout code
@@ -119,6 +123,8 @@ jobs:
             --stack-name ${{ env.STACK_NAME }} \
             --region ${{ env.AWS_REGION }} \
             --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+            --resolve-s3 \
+            --s3-prefix profile-photo-ai-prod \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
             --parameter-overrides \
