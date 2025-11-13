@@ -116,6 +116,22 @@ jobs:
             --region ${{ env.AWS_REGION }} \
             --query 'Stacks[0]' > backup-$TIMESTAMP.json || echo "No existing stack"
       
+      - name: Get Google OAuth credentials
+        id: oauth-creds
+        run: |
+          echo "🔐 Fetching Google OAuth credentials from Secrets Manager..."
+          OAUTH_SECRET=$(aws secretsmanager get-secret-value \
+            --secret-id /profile-photo-ai/prod/google-oauth \
+            --region ${{ env.AWS_REGION }} \
+            --query SecretString --output text)
+          
+          CLIENT_ID=$(echo $OAUTH_SECRET | jq -r '.client_id')
+          CLIENT_SECRET=$(echo $OAUTH_SECRET | jq -r '.client_secret')
+          
+          echo "client_id=$CLIENT_ID" >> $GITHUB_OUTPUT
+          echo "client_secret=$CLIENT_SECRET" >> $GITHUB_OUTPUT
+          echo "✅ OAuth credentials loaded"
+      
       - name: Deploy to AWS Production
         run: |
           echo "🚀 Deploying to PRODUCTION..."
@@ -128,7 +144,9 @@ jobs:
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
             --parameter-overrides \
-              Environment=${{ env.ENVIRONMENT }}
+              Environment=${{ env.ENVIRONMENT }} \
+              GoogleOAuthClientId="${{ steps.oauth-creds.outputs.client_id }}" \
+              GoogleOAuthClientSecret="${{ steps.oauth-creds.outputs.client_secret }}"
       
       - name: Get stack outputs
         id: stack-outputs
