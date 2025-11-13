@@ -21,7 +21,33 @@
 
 ## ⏳ 예정 작업 (TODO)
 
-#### 1. 스타일 선택 UI 개선 - 이모지 → 샘플 이미지로 변경
+### [P0] [Infrastructure] GitHub Actions CI/CD 파이프라인 구축
+- **설명**: Dev/Prod 환경 자동 배포 파이프라인 구성 (OIDC 기반)
+- **작업 내용**:
+  - [x] Discord Webhook 설정 가이드 작성 (`docs/setup/DISCORD_WEBHOOK_SETUP.md`)
+  - [x] IAM OIDC Policy 생성 스크립트 작성 (`scripts/setup-github-oidc.py`)
+  - [x] Dev 배포 워크플로우 작성 (`.github/workflows/deploy-dev.yml`)
+  - [x] Prod 배포 워크플로우 작성 (`.github/workflows/deploy-prod.yml`)
+  - [x] 리소스 네이밍 일관성 수정 (`profilephotoai` → `profile-photo-ai`)
+  - [x] AWS OIDC Provider 생성 (token.actions.githubusercontent.com)
+  - [x] IAM Role 생성: profile-photo-ai-dev-role, profile-photo-ai-prod-role
+  - [x] GitHub Secrets 설정 (AWS_ACCOUNT_ID, DISCORD_WEBHOOK_URL, OAuth Credentials)
+  - [x] AWS Secrets Manager에 Gemini API Key 저장
+  - [ ] Develop 브랜치 생성 및 첫 배포 테스트
+  - [ ] Main 브랜치 Prod 배포 테스트
+- **우선순위**: P0 (Critical)
+- **예상 소요 시간**: 5시간 (4시간 완료, 1시간 남음)
+- **관련 파일**:
+  - `.github/workflows/deploy-dev.yml`
+  - `.github/workflows/deploy-prod.yml`
+  - `scripts/setup-github-oidc.py`
+  - `docs/setup/DISCORD_WEBHOOK_SETUP.md`
+- **브랜치 전략**: GitHub Flow (develop → main만 사용)
+- **다음 단계**: AWS Console에서 OIDC Provider/IAM Role 생성 → GitHub Secrets 설정
+
+---
+
+### [P1] [Frontend] 스타일 선택 UI 개선 - 이모지 → 샘플 이미지로 변경
 - **설명**: StyleSelector 컴포넌트에서 이모지 아이콘을 실제 생성 결과 샘플 이미지로 교체
 - **작업 내용**:
   - [ ] 각 스타일별 샘플 이미지 제작/수집 (Professional, Friendly, Outdoor, Formal, Academic)
@@ -257,6 +283,47 @@
   - ✅ 반응형 디자인: 1200px/768px/480px 브레이크포인트
   - ✅ 빌드 성공: 110.24KB gzip (경고 없음)
 
+<<<<<<< HEAD
+=======
+### 2025-11-13
+- ✅ **GitHub Actions CI/CD 워크플로우 작성 완료** (3시간 소요)
+  - ✅ Discord Webhook 설정 가이드 문서 작성 (`docs/setup/DISCORD_WEBHOOK_SETUP.md`)
+  - ✅ IAM OIDC Policy 생성 스크립트 작성 (`scripts/setup-github-oidc.py`)
+  - ✅ Dev 배포 워크플로우 작성 (`.github/workflows/deploy-dev.yml`)
+    - develop 브랜치 push 시 자동 배포
+    - 테스트 → 배포 → S3 프론트엔드 배포 → CloudFront 캐시 무효화 → Discord 알림
+  - ✅ Prod 배포 워크플로우 작성 (`.github/workflows/deploy-prod.yml`)
+    - main 브랜치 push 시 자동 배포
+    - 테스트 → 백업 → 배포 → S3 프론트엔드 배포 → CloudFront 캐시 무효화 → 릴리즈 태그 → Discord 알림
+  - ✅ 불필요한 Google OAuth 자동화 스크립트 제거 (수동 설정 권장)
+  - ✅ 브랜치 전략 결정: GitHub Flow (develop → main만 사용, feature 브랜치 제외)
+  - ✅ 최소 권한 원칙 적용: 리소스 ARN을 `profile-photo-ai-*` 패턴으로 제한
+  - ✅ Route53, CloudFront, ACM 권한 포함 (커스텀 도메인 지원)
+  - ✅ 프론트엔드 자동 배포: S3 sync + CloudFront invalidation 추가
+  - ✅ **리소스 네이밍 일관성 수정 완료** (1시간 소요)
+    - ✅ 프로젝트 전체 `profilephotoai` → `profile-photo-ai` 수정
+    - ✅ S3 버킷명: `profile-photo-ai-frontend-dev/prod`
+    - ✅ CloudFormation 스택명: `profile-photo-ai-dev/prod`
+    - ✅ IAM Role명: `profile-photo-ai-dev-role/prod-role`
+    - ✅ DynamoDB 테이블명: `Profile-Photo-AI-Users-dev` 등
+    - ✅ SQS 큐명: `Profile-Photo-AI-ImageProcess-dev` 등
+    - ✅ Lambda 로그 그룹명: `/aws/lambda/Profile-Photo-AI-*`
+    - ✅ LocalStack 스크립트, 테스트 파일, Makefile, docker-compose 모두 수정
+
+### 2025-11-12
+- ✅ **프론트엔드 카메라 촬영 기능 추가 완료** (3시간 소요)
+  - ✅ 디바이스 타입 감지 (768px 기준으로 PC/모바일 구분)
+  - ✅ PC에서만 웹캠 버튼 표시
+  - ✅ MediaStream API로 웹캠 스트림 시작/종료
+  - ✅ Canvas로 사진 캡처 및 File 객체 변환 (JPEG 95% 품질)
+  - ✅ 웹캠 UI 컴포넌트 (비디오 + 촬영/취소 버튼)
+  - ✅ CSS 스타일 추가 (웹캠 컨테이너, 버튼, 거울 모드)
+  - ✅ 비디오 재생 로직 개선 (loadedmetadata 이벤트 대기)
+  - ✅ 로컬 테스트 완료 (PC 크롬: 웹캠 촬영 → 이미지 업로드 → 생성 → 다운로드)
+  - ✅ 모바일: 네이티브 카메라 동작 확인
+  - ✅ 빌드 성공: 110.66KB gzip (+551B)
+
+>>>>>>> 29bb018 (추가: task관리, GitHub Actions CI/CD 파이프라인 구축 및 관련 작업 완료)
 ---
 
 ## 🔴 블로킹된 작업 (BLOCKED)
@@ -320,4 +387,7 @@
 
 ---
 
-**마지막 업데이트**: 2025-11-08  
+---
+
+**마지막 업데이트**: 2025-11-13
+  
