@@ -1,0 +1,1503 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: profile-photo-ai - AI-powered profile photo generation service
+
+# Global settings for all functions
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 30
+    MemorySize: 512
+    Environment:
+      Variables:
+        UPLOAD_BUCKET: !Ref UploadBucket
+        RESULT_BUCKET: !Ref ResultBucket
+        USERS_TABLE: !Ref UsersTable
+        USAGE_LOG_TABLE: !Ref UsageLogTable
+        IMAGE_JOBS_TABLE: !Ref ImageJobsTable
+        DAILY_LIMIT: 15
+    Layers:
+      - !Ref DynamoDBHelperLayer
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+    Description: Environment name
+
+  FrontendCallbackUrl:
+    Type: String
+    Description: Frontend callback URL for OAuth2 (e.g., https://yourdomain.com/callback)
+    Default: http://localhost:3000/callback
+
+  GoogleOAuthClientId:
+    Type: String
+    Description: Google OAuth Client ID (will be fetched from Secrets Manager if empty)
+    Default: ''
+    NoEcho: true
+
+  GoogleOAuthClientSecret:
+    Type: String
+    Description: Google OAuth Client Secret (will be fetched from Secrets Manager if empty)
+    Default: ''
+    NoEcho: true
+
+  DomainName:
+    Type: String
+    Description: Custom domain name for the website (e.g., profilephoto.ai)
+    Default: ''
+
+  HostedZoneId:
+    Type: String
+    Description: Route53 Hosted Zone ID (optional, leave empty if not using custom domain)
+    Default: ''
+
+  CertificateArn:
+    Type: String
+    Description: ACM Certificate ARN for CloudFront (must be in us-east-1, optional)
+    Default: ''
+
+  DiscordWebhookUrl:
+    Type: String
+    Description: Discord Webhook URL for alarm notifications
+    Default: ''
+    NoEcho: true
+
+Conditions:
+  HasCustomDomain: !Not
+    - !Equals
+      - !Ref DomainName
+      - ''
+  HasCertificate: !Not
+    - !Equals
+      - !Ref CertificateArn
+      - ''
+
+Resources:
+  # ========================================
+  # S3 Buckets
+  # ========================================
+
+  UploadBucket:
+    Type: AWS::S3::Bucket
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Sub profile-photo-ai-uploads-raw-${Environment}
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - '*'
+            AllowedMethods:
+              - PUT
+              - POST
+              - GET
+            AllowedOrigins:
+              - '*'
+            MaxAge: 3000
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldUploads
+            Status: Enabled
+            ExpirationInDays: 7
+            NoncurrentVersionExpirationInDays: 1
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: false # Allow bucket policy
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: false # Allow bucket policy
+      VersioningConfiguration:
+        Status: Enabled
+
+  # S3 Bucket Policy for Lambda access
+  ResultBucket:
+    Type: AWS::S3::Bucket
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Sub profile-photo-ai-results-final-${Environment}
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - '*'
+            AllowedMethods:
+              - GET
+            AllowedOrigins:
+              - '*'
+            MaxAge: 3000
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldResults
+            Status: Enabled
+            ExpirationInDays: 30
+            NoncurrentVersionExpirationInDays: 1
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true # 퍼블릭 접근 완전 차단
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true # 퍼블릭 접근 완전 차단
+      VersioningConfiguration:
+        Status: Enabled
+
+  # Frontend S3 Bucket for CloudFront distribution
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Sub profile-photo-ai-frontend-${Environment}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  # Frontend Bucket Policy - Allow CloudFront OAI access
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Statement:
+          - Sid: AllowCloudFrontOAI
+            Effect: Allow
+            Principal:
+              CanonicalUser: !GetAtt CloudFrontOriginAccessIdentity.S3CanonicalUserId
+            Action: s3:GetObject
+            Resource: !Sub ${FrontendBucket.Arn}/*
+
+  # ========================================
+  # Log Archive S3 Bucket (Phase 6)
+  # ========================================
+
+  LogArchiveBucket:
+    Type: AWS::S3::Bucket
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Sub profile-photo-ai-logs-archive-${Environment}
+      LifecycleConfiguration:
+        Rules:
+          - Id: TransitionToGlacier
+            Status: Enabled
+            Transitions:
+              - TransitionInDays: 90
+                StorageClass: GLACIER
+            ExpirationInDays: 365
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  # CloudFront Origin Access Identity
+  CloudFrontOriginAccessIdentity:
+    Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+    Properties:
+      CloudFrontOriginAccessIdentityConfig:
+        Comment: !Sub OAI for profile-photo-ai Frontend ${Environment}
+
+  # CloudFront Distribution
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub profile-photo-ai Frontend Distribution ${Environment}
+        DefaultRootObject: index.html
+        HttpVersion: http2
+        PriceClass: PriceClass_100 # Use only North America and Europe
+        Aliases: !If
+          - HasCustomDomain
+          - - !Ref DomainName
+          - !Ref AWS::NoValue
+        ViewerCertificate: !If
+          - HasCertificate
+          - AcmCertificateArn: !Ref CertificateArn
+            SslSupportMethod: sni-only
+            MinimumProtocolVersion: TLSv1.2_2021
+          - CloudFrontDefaultCertificate: true
+        Origins:
+          - Id: S3Origin
+            DomainName: !GetAtt FrontendBucket.RegionalDomainName
+            S3OriginConfig:
+              OriginAccessIdentity: !Sub origin-access-identity/cloudfront/${CloudFrontOriginAccessIdentity}
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          CachedMethods:
+            - GET
+            - HEAD
+          Compress: true
+          ForwardedValues:
+            QueryString: false
+            Cookies:
+              Forward: none
+          DefaultTTL: 86400 # 1 day
+          MaxTTL: 31536000 # 1 year
+          MinTTL: 0
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 300
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 300
+
+  # Route53 Record (only if custom domain is provided)
+  Route53Record:
+    Type: AWS::Route53::RecordSet
+    Condition: HasCustomDomain
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref DomainName
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt CloudFrontDistribution.DomainName
+        HostedZoneId: Z2FDTNDATAQYW2 # CloudFront's hosted zone ID (constant)
+        EvaluateTargetHealth: false
+
+  # ========================================
+  # DynamoDB Tables
+  # ========================================
+
+  UsersTable:
+    Type: AWS::DynamoDB::Table
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+    Properties:
+      TableName: !Sub profile-photo-ai-Users-${Environment}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: userId
+          AttributeType: S
+        - AttributeName: email
+          AttributeType: S
+      KeySchema:
+        - AttributeName: userId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: EmailIndex
+          KeySchema:
+            - AttributeName: email
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  UsageLogTable:
+    Type: AWS::DynamoDB::Table
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+    Properties:
+      TableName: !Sub profile-photo-ai-UsageLog-${Environment}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: userIdDate
+          AttributeType: S
+      KeySchema:
+        - AttributeName: userIdDate
+          KeyType: HASH
+      TimeToLiveSpecification:
+        Enabled: true
+        AttributeName: ttl
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  ImageJobsTable:
+    Type: AWS::DynamoDB::Table
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+    Properties:
+      TableName: !Sub profile-photo-ai-ImageJobs-${Environment}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: jobId
+          AttributeType: S
+        - AttributeName: userId
+          AttributeType: S
+        - AttributeName: createdAt
+          AttributeType: S
+        - AttributeName: status
+          AttributeType: S
+      KeySchema:
+        - AttributeName: jobId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: UserIdCreatedAtIndex
+          KeySchema:
+            - AttributeName: userId
+              KeyType: HASH
+            - AttributeName: createdAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: StatusIndex
+          KeySchema:
+            - AttributeName: status
+              KeyType: HASH
+            - AttributeName: createdAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ========================================
+  # SQS Queue
+  # ========================================
+
+  ImageProcessQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub profile-photo-ai-ImageProcess-${Environment}
+      VisibilityTimeout: 900 # 15 minutes (Lambda timeout should be less)
+      MessageRetentionPeriod: 1209600 # 14 days
+      ReceiveMessageWaitTimeSeconds: 20 # Long polling
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt ImageProcessDLQ.Arn
+        maxReceiveCount: 3
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  ImageProcessDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub profile-photo-ai-ImageProcess-DLQ-${Environment}
+      MessageRetentionPeriod: 1209600 # 14 days
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ========================================
+  # Lambda Layer
+  # ========================================
+
+  DynamoDBHelperLayer:
+    Type: AWS::Serverless::LayerVersion
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+    Properties:
+      LayerName: !Sub profile-photo-ai-DynamoDBHelper-${Environment}
+      Description: DynamoDB helper functions and common utilities
+      ContentUri: backend/layers/
+      CompatibleRuntimes:
+        - python3.12
+        - python3.11
+        - python3.10
+    Metadata:
+      BuildMethod: python3.12
+
+  # ========================================
+  # Lambda Functions
+  # ========================================
+
+  FileTransferFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub profile-photo-ai-FileTransfer-${Environment}
+      CodeUri: backend/lambda/file_transfer/
+      Handler: file_transfer.lambda_handler
+      Description: Generate presigned URLs for file uploads
+      Environment:
+        Variables:
+          PRESIGNED_URL_EXPIRATION: 3600
+      Policies:
+        # S3 Upload Bucket - PutObject only for presigned URLs
+        - Statement:
+            - Sid: S3PresignedUrlGeneration
+              Effect: Allow
+              Action:
+                - s3:PutObject
+                - s3:PutObjectAcl
+              Resource:
+                - !Join
+                  - ''
+                  - - !GetAtt UploadBucket.Arn
+                    - /*
+        # CloudWatch Logs
+        - Statement:
+            - Sid: CloudWatchLogsAccess
+              Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-FileTransfer-${Environment}:*
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /upload
+            Method: POST
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  ApiManagerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub profile-photo-ai-ApiManager-${Environment}
+      CodeUri: backend/lambda/api/
+      Handler: api_manager.lambda_handler
+      Description: Handle image generation requests and manage jobs
+      Timeout: 60
+      Environment:
+        Variables:
+          SQS_QUEUE_URL: !Ref ImageProcessQueue
+          ProfilePhotoAI_Users_Table: !Ref UsersTable
+          ProfilePhotoAI_UsageLog_Table: !Ref UsageLogTable
+          ProfilePhotoAI_ImageJobs_Table: !Ref ImageJobsTable
+      Policies:
+        # DynamoDB - Users Table
+        - Statement:
+            - Sid: DynamoDBUsersTableAccess
+              Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:Query
+              Resource:
+                - !GetAtt UsersTable.Arn
+                - !Sub ${UsersTable.Arn}/index/*
+        # DynamoDB - UsageLog Table
+        - Statement:
+            - Sid: DynamoDBUsageLogTableAccess
+              Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:Query
+              Resource:
+                - !GetAtt UsageLogTable.Arn
+        # DynamoDB - ImageJobs Table
+        - Statement:
+            - Sid: DynamoDBImageJobsTableAccess
+              Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:Query
+              Resource:
+                - !GetAtt ImageJobsTable.Arn
+                - !Sub ${ImageJobsTable.Arn}/index/*
+        # S3 Upload Bucket - Read access
+        - Statement:
+            - Sid: S3UploadBucketRead
+              Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:GetObjectVersion
+                - s3:HeadObject
+              Resource:
+                - !Sub ${UploadBucket.Arn}/*
+        # S3 Result Bucket - Read access (Presigned URL 생성용)
+        - Statement:
+            - Sid: S3ResultBucketRead
+              Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:HeadObject
+              Resource:
+                - !Sub ${ResultBucket.Arn}/*
+        # SQS - Send messages only
+        - Statement:
+            - Sid: SQSSendMessageAccess
+              Effect: Allow
+              Action:
+                - sqs:SendMessage
+                - sqs:GetQueueAttributes
+              Resource: !GetAtt ImageProcessQueue.Arn
+        # CloudWatch Logs
+        - Statement:
+            - Sid: CloudWatchLogsAccess
+              Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-ApiManager-${Environment}:*
+      Events:
+        GenerateEvent:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /generate
+            Method: POST
+            Auth:
+              Authorizer: CognitoAuthorizer
+        GetJobEvent:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /jobs/{jobId}
+            Method: GET
+            Auth:
+              Authorizer: CognitoAuthorizer
+        DownloadImageEvent:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /jobs/{jobId}/download
+            Method: GET
+            Auth:
+              Authorizer: CognitoAuthorizer
+        GetUserEvent:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /user/me
+            Method: GET
+            Auth:
+              Authorizer: CognitoAuthorizer
+        GetUserJobsEvent:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /user/jobs
+            Method: GET
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  ImageProcessFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub profile-photo-ai-ImageProcess-${Environment}
+      CodeUri: backend/lambda/process/
+      Handler: process.lambda_handler
+      Description: Process images using Gemini AI
+      Timeout: 900 # 15 minutes
+      MemorySize: 2048
+      Environment:
+        Variables:
+          GEMINI_API_KEY_SECRET_ARN: !Sub /profile-photo-ai/${Environment}/gemini-api-key
+          MODEL_NAME: gemini-2.5-flash-image
+          ProfilePhotoAI_Users_Table: !Ref UsersTable
+          ProfilePhotoAI_ImageJobs_Table: !Ref ImageJobsTable
+      Policies:
+        # Secrets Manager - Read Gemini API Key
+        - Statement:
+            - Sid: SecretsManagerReadAccess
+              Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:/profile-photo-ai/${Environment}/*
+        # DynamoDB - Users Table (increment total images)
+        - Statement:
+            - Sid: DynamoDBUsersTableAccess
+              Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:UpdateItem
+              Resource: !GetAtt UsersTable.Arn
+        # DynamoDB - ImageJobs Table (update job status)
+        - Statement:
+            - Sid: DynamoDBImageJobsTableAccess
+              Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:UpdateItem
+              Resource: !GetAtt ImageJobsTable.Arn
+        # S3 - Read from Upload Bucket
+        - Statement:
+            - Sid: S3ReadUploadBucket
+              Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:HeadObject
+              Resource:
+                - !Join
+                  - ''
+                  - - !GetAtt UploadBucket.Arn
+                    - /*
+        # S3 - Write to Result Bucket
+        - Statement:
+            - Sid: S3WriteResultBucket
+              Effect: Allow
+              Action:
+                - s3:PutObject
+                - s3:PutObjectAcl
+              Resource:
+                - !Join
+                  - ''
+                  - - !GetAtt ResultBucket.Arn
+                    - /*
+        # SQS - Receive and delete messages (managed by event source mapping)
+        - Statement:
+            - Sid: SQSReceiveDeleteMessages
+              Effect: Allow
+              Action:
+                - sqs:ReceiveMessage
+                - sqs:DeleteMessage
+                - sqs:GetQueueAttributes
+              Resource: !GetAtt ImageProcessQueue.Arn
+        # CloudWatch Logs
+        - Statement:
+            - Sid: CloudWatchLogsAccess
+              Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-ImageProcess-${Environment}:*
+      Events:
+        SQSEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt ImageProcessQueue.Arn
+            BatchSize: 1
+            Enabled: true
+
+  # ========================================
+  # Monitoring - Webhook Notifier Function
+  # ========================================
+
+  WebhookNotifierFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub profile-photo-ai-WebhookNotifier-${Environment}
+      CodeUri: backend/lambda/monitoring/webhook_notifier/
+      Handler: app.lambda_handler
+      Description: Send CloudWatch Alarm notifications to Discord
+      Timeout: 10
+      MemorySize: 128
+      Environment:
+        Variables:
+          WEBHOOK_URL: !Ref DiscordWebhookUrl
+          ENVIRONMENT: !Ref Environment
+      Policies:
+        # CloudWatch Logs
+        - Statement:
+            - Sid: CloudWatchLogsAccess
+              Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/profile-photo-ai-WebhookNotifier-${Environment}:*
+      Events:
+        SNSTrigger:
+          Type: SNS
+          Properties:
+            Topic: !Ref AlarmNotificationTopic
+
+  # ========================================
+  # Monitoring - Statistics Aggregator Function
+  # ========================================
+
+  StatsAggregatorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub profile-photo-ai-StatsAggregator-${Environment}
+      CodeUri: backend/lambda/monitoring/stats_aggregator/
+      Handler: stats_aggregator.lambda_handler
+      Description: Aggregate hourly statistics and publish custom metrics
+      Timeout: 60 # CloudWatch Logs 쿼리 대기 시간
+      MemorySize: 256
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+      Policies:
+        # CloudWatch Logs - Read for Insights queries
+        - Statement:
+            - Sid: CloudWatchLogsReadAccess
+              Effect: Allow
+              Action:
+                - logs:StartQuery
+                - logs:GetQueryResults
+                - logs:DescribeLogGroups
+              Resource:
+                - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/profile-photo-ai-*
+        # CloudWatch - Publish custom metrics
+        - Statement:
+            - Sid: CloudWatchPutMetricAccess
+              Effect: Allow
+              Action:
+                - cloudwatch:PutMetricData
+              Resource: '*'
+              Condition:
+                StringEquals:
+                  cloudwatch:namespace: !Sub ProfilePhotoAI/${Environment}/Statistics
+        # CloudWatch Logs - Write logs
+        - Statement:
+            - Sid: CloudWatchLogsWriteAccess
+              Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/profile-photo-ai-StatsAggregator-${Environment}:*
+      Events:
+        HourlySchedule:
+          Type: Schedule
+          Properties:
+            Schedule: rate(1 hour) # 매 1시간마다 실행
+            Description: Aggregate hourly statistics and publish custom metrics
+            Enabled: true
+
+  StatsAggregatorLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/profile-photo-ai-StatsAggregator-${Environment}
+      RetentionInDays: 7
+
+  # ========================================
+  # Log Archiving Infrastructure (Phase 6)
+  # ========================================
+
+  # IAM Role for Kinesis Firehose
+  FirehoseLogDeliveryRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: firehose.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: FirehoseS3DeliveryPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:PutObjectAcl
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                Resource: !Sub ${LogArchiveBucket.Arn}/*
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetBucketLocation
+                Resource: !GetAtt LogArchiveBucket.Arn
+
+  # Kinesis Firehose Delivery Stream
+  LogArchiveFirehose:
+    Type: AWS::KinesisFirehose::DeliveryStream
+    Properties:
+      DeliveryStreamName: !Sub profile-photo-ai-LogArchive-${Environment}
+      DeliveryStreamType: DirectPut
+      ExtendedS3DestinationConfiguration:
+        BucketARN: !GetAtt LogArchiveBucket.Arn
+        RoleARN: !GetAtt FirehoseLogDeliveryRole.Arn
+        Prefix: logs/year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/
+        ErrorOutputPrefix: errors/year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/!{firehose:error-output-type}/
+        BufferingHints:
+          SizeInMBs: 5
+          IntervalInSeconds: 300 # 5분마다 또는 5MB마다 전송
+        CompressionFormat: GZIP
+        CloudWatchLoggingOptions:
+          Enabled: true
+          LogGroupName: !Ref FirehoseLogGroup
+          LogStreamName: S3Delivery
+
+  FirehoseLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/kinesisfirehose/profile-photo-ai-LogArchive-${Environment}
+      RetentionInDays: 7
+
+  # IAM Role for CloudWatch Logs to Kinesis Firehose
+  CloudWatchLogsToFirehoseRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub logs.${AWS::Region}.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CloudWatchLogsToFirehosePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - firehose:PutRecord
+                  - firehose:PutRecordBatch
+                Resource: !GetAtt LogArchiveFirehose.Arn
+
+  # Subscription Filters - Archive all Lambda logs to S3
+  FileTransferLogSubscription:
+    Type: AWS::Logs::SubscriptionFilter
+    Properties:
+      DestinationArn: !GetAtt LogArchiveFirehose.Arn
+      FilterPattern: '' # 모든 로그
+      LogGroupName: !Ref FileTransferLogGroup
+      RoleArn: !GetAtt CloudWatchLogsToFirehoseRole.Arn
+
+  ApiManagerLogSubscription:
+    Type: AWS::Logs::SubscriptionFilter
+    Properties:
+      DestinationArn: !GetAtt LogArchiveFirehose.Arn
+      FilterPattern: ''
+      LogGroupName: !Ref ApiManagerLogGroup
+      RoleArn: !GetAtt CloudWatchLogsToFirehoseRole.Arn
+
+  ImageProcessLogSubscription:
+    Type: AWS::Logs::SubscriptionFilter
+    Properties:
+      DestinationArn: !GetAtt LogArchiveFirehose.Arn
+      FilterPattern: ''
+      LogGroupName: !Ref ImageProcessLogGroup
+      RoleArn: !GetAtt CloudWatchLogsToFirehoseRole.Arn
+
+  WebhookNotifierLogSubscription:
+    Type: AWS::Logs::SubscriptionFilter
+    Properties:
+      DestinationArn: !GetAtt LogArchiveFirehose.Arn
+      FilterPattern: ''
+      LogGroupName: !Ref WebhookNotifierLogGroup
+      RoleArn: !GetAtt CloudWatchLogsToFirehoseRole.Arn
+
+  StatsAggregatorLogSubscription:
+    Type: AWS::Logs::SubscriptionFilter
+    Properties:
+      DestinationArn: !GetAtt LogArchiveFirehose.Arn
+      FilterPattern: ''
+      LogGroupName: !Ref StatsAggregatorLogGroup
+      RoleArn: !GetAtt CloudWatchLogsToFirehoseRole.Arn
+
+  # ========================================
+  # SNS Topic for CloudWatch Alarms
+  # ========================================
+
+  AlarmNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub profile-photo-ai-AlarmNotifications-${Environment}
+      DisplayName: CloudWatch Alarm Notifications
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ========================================
+  # CloudWatch Logs - Log Groups with Retention
+  # ========================================
+
+  FileTransferLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/profile-photo-ai-FileTransfer-${Environment}
+      RetentionInDays: 7
+
+  ApiManagerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/profile-photo-ai-ApiManager-${Environment}
+      RetentionInDays: 7
+
+  ImageProcessLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/profile-photo-ai-ImageProcess-${Environment}
+      RetentionInDays: 7
+
+  WebhookNotifierLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/profile-photo-ai-WebhookNotifier-${Environment}
+      RetentionInDays: 7
+
+  # ========================================
+  # CloudWatch Metric Filters
+  # ========================================
+
+  # 1. Error Log Count (모든 Lambda의 ERROR 레벨 로그)
+  ErrorLogMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      FilterPattern: '{ $.level = "ERROR" }'
+      LogGroupName: !Ref ImageProcessLogGroup
+      MetricTransformations:
+        - MetricName: ErrorLogCount
+          MetricNamespace: !Sub ProfilePhotoAI/${Environment}
+          MetricValue: '1'
+          DefaultValue: 0
+          Unit: Count
+
+  # 2. Gemini Quota Exceeded (긴급)
+  GeminiQuotaExceededMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      FilterPattern: '{ $.event = "gemini_quota_exceeded" || $.error = "*quota*" ||
+        $.error = "*rate limit*" }'
+      LogGroupName: !Ref ImageProcessLogGroup
+      MetricTransformations:
+        - MetricName: GeminiQuotaExceeded
+          MetricNamespace: !Sub ProfilePhotoAI/${Environment}
+          MetricValue: '1'
+          DefaultValue: 0
+          Unit: Count
+
+  # 3. Gemini API Error
+  GeminiAPIErrorMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      FilterPattern: '{ $.event = "gemini_api_error" }'
+      LogGroupName: !Ref ImageProcessLogGroup
+      MetricTransformations:
+        - MetricName: GeminiAPIError
+          MetricNamespace: !Sub ProfilePhotoAI/${Environment}
+          MetricValue: '1'
+          DefaultValue: 0
+          Unit: Count
+
+  # 4. S3 Upload Failure
+  S3UploadFailureMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      FilterPattern: '{ $.event = "s3_upload_failed" || ($.level = "ERROR" && $.error
+        = "*S3*") }'
+      LogGroupName: !Ref ImageProcessLogGroup
+      MetricTransformations:
+        - MetricName: S3UploadFailure
+          MetricNamespace: !Sub ProfilePhotoAI/${Environment}
+          MetricValue: '1'
+          DefaultValue: 0
+          Unit: Count
+
+  # 5. DynamoDB Write Failure (긴급)
+  DynamoDBWriteFailureMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      FilterPattern: '{ $.event = "dynamodb_update_failed" || ($.level = "ERROR" &&
+        $.error = "*DynamoDB*") }'
+      LogGroupName: !Ref ImageProcessLogGroup
+      MetricTransformations:
+        - MetricName: DynamoDBWriteFailure
+          MetricNamespace: !Sub ProfilePhotoAI/${Environment}
+          MetricValue: '1'
+          DefaultValue: 0
+          Unit: Count
+
+  # 6. Slow Response (30초 초과)
+  SlowResponseMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      FilterPattern: '{ $.event = "gemini_api_slow_response" || $.event = "slow_processing" }'
+      LogGroupName: !Ref ImageProcessLogGroup
+      MetricTransformations:
+        - MetricName: SlowResponse
+          MetricNamespace: !Sub ProfilePhotoAI/${Environment}
+          MetricValue: '1'
+          DefaultValue: 0
+          Unit: Count
+
+  # 7. Rate Limit Detected
+  RateLimitDetectedMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      FilterPattern: '{ $.event = "rate_limit_detected" }'
+      LogGroupName: !Ref FileTransferLogGroup
+      MetricTransformations:
+        - MetricName: RateLimitDetected
+          MetricNamespace: !Sub ProfilePhotoAI/${Environment}
+          MetricValue: '1'
+          DefaultValue: 0
+          Unit: Count
+
+  # 8. Job Failed
+  JobFailedMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      FilterPattern: '{ $.event = "job_failed" }'
+      LogGroupName: !Ref ImageProcessLogGroup
+      MetricTransformations:
+        - MetricName: JobFailed
+          MetricNamespace: !Sub ProfilePhotoAI/${Environment}
+          MetricValue: '1'
+          DefaultValue: 0
+          Unit: Count
+
+  # ========================================
+  # CloudWatch Alarms - P0 (즉시 알림)
+  # ========================================
+
+  # P0-1: Gemini Quota Exceeded (즉시 알림)
+  GeminiQuotaExceededAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub profile-photo-ai-P0-GeminiQuotaExceeded-${Environment}
+      AlarmDescription: 'CRITICAL: Gemini API quota exceeded - immediate action required'
+      MetricName: GeminiQuotaExceeded
+      Namespace: !Sub ProfilePhotoAI/${Environment}
+      Statistic: Sum
+      Period: 60 # 1분
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+
+  # P0-2: Lambda Errors (ImageProcess)
+  ImageProcessErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub profile-photo-ai-P0-ImageProcessErrors-${Environment}
+      AlarmDescription: 'CRITICAL: Lambda errors in image processing'
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref ImageProcessFunction
+      Statistic: Sum
+      Period: 60 # 1분
+      EvaluationPeriods: 1
+      Threshold: 5 # 1분에 5개 이상 에러
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+
+  # P0-3: DynamoDB Write Failure
+  DynamoDBWriteFailureAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub profile-photo-ai-P0-DynamoDBWriteFailure-${Environment}
+      AlarmDescription: 'CRITICAL: DynamoDB write failures detected'
+      MetricName: DynamoDBWriteFailure
+      Namespace: !Sub ProfilePhotoAI/${Environment}
+      Statistic: Sum
+      Period: 60 # 1분
+      EvaluationPeriods: 1
+      Threshold: 3
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+
+  # ========================================
+  # CloudWatch Alarms - P1 (1시간 집계)
+  # ========================================
+
+  # P1-1: Gemini API Errors (1시간 집계)
+  GeminiAPIErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub profile-photo-ai-P1-GeminiAPIErrors-${Environment}
+      AlarmDescription: 'WARNING: High rate of Gemini API errors in the last hour'
+      MetricName: GeminiAPIError
+      Namespace: !Sub ProfilePhotoAI/${Environment}
+      Statistic: Sum
+      Period: 3600 # 1시간
+      EvaluationPeriods: 1
+      Threshold: 10 # 1시간에 10개 이상
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+
+  # P1-2: S3 Upload Failures (1시간 집계)
+  S3UploadFailureAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub profile-photo-ai-P1-S3UploadFailures-${Environment}
+      AlarmDescription: 'WARNING: High rate of S3 upload failures in the last hour'
+      MetricName: S3UploadFailure
+      Namespace: !Sub ProfilePhotoAI/${Environment}
+      Statistic: Sum
+      Period: 3600 # 1시간
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+
+  # P1-3: Slow Responses (1시간 집계)
+  SlowResponseAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub profile-photo-ai-P1-SlowResponses-${Environment}
+      AlarmDescription: 'WARNING: High rate of slow responses (>30s) in the last hour'
+      MetricName: SlowResponse
+      Namespace: !Sub ProfilePhotoAI/${Environment}
+      Statistic: Sum
+      Period: 3600 # 1시간
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+
+  # P1-4: Job Failure Rate (1시간 집계)
+  JobFailureRateAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub profile-photo-ai-P1-JobFailureRate-${Environment}
+      AlarmDescription: 'WARNING: High job failure rate in the last hour'
+      MetricName: JobFailed
+      Namespace: !Sub ProfilePhotoAI/${Environment}
+      Statistic: Sum
+      Period: 3600 # 1시간
+      EvaluationPeriods: 1
+      Threshold: 10 # 1시간에 10개 이상 실패
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+
+  # ========================================
+  # CloudWatch Alarms - Infrastructure (AWS 서비스)
+  # ========================================
+
+  # SQS Dead Letter Queue Alarm
+  SQSDLQMessagesAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub profile-photo-ai-P0-SQS-DLQ-Messages-${Environment}
+      AlarmDescription: 'CRITICAL: Messages in Dead Letter Queue - processing failures detected'
+      MetricName: ApproximateNumberOfMessagesVisible
+      Namespace: AWS/SQS
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt ImageProcessDLQ.QueueName
+      Statistic: Sum
+      Period: 60 # 1분
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+
+  # Lambda Throttles (API Manager)
+  ApiManagerThrottleAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub profile-photo-ai-P1-ApiManagerThrottles-${Environment}
+      AlarmDescription: 'WARNING: API Manager Lambda is being throttled'
+      MetricName: Throttles
+      Namespace: AWS/Lambda
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref ApiManagerFunction
+      Statistic: Sum
+      Period: 300 # 5분
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+
+  # ========================================
+  # API Gateway HTTP API
+  # ========================================
+
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: !Ref Environment
+      CorsConfiguration:
+        AllowOrigins:
+          - '*'
+        AllowHeaders:
+          - Content-Type
+          - Authorization
+          - X-Amz-Date
+          - X-Api-Key
+          - X-Amz-Security-Token
+        AllowMethods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+          - OPTIONS
+        MaxAge: 300
+      Auth:
+        Authorizers:
+          CognitoAuthorizer:
+            IdentitySource: $request.header.Authorization
+            JwtConfiguration:
+              audience:
+                - !Ref CognitoUserPoolClient
+              issuer: !Sub https://cognito-idp.${AWS::Region}.amazonaws.com/${CognitoUserPool}
+      Tags:
+        Environment: !Ref Environment
+
+  # ========================================
+  # Cognito User Pool
+  # ========================================
+
+  CognitoUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub profile-photo-ai-Users-${Environment}
+      UsernameAttributes:
+        - email
+      AutoVerifiedAttributes:
+        - email
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Required: true
+          Mutable: true
+        - Name: name
+          AttributeDataType: String
+          Required: false
+          Mutable: true
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireUppercase: true
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+      UserPoolTags:
+        Environment: !Ref Environment
+
+  CognitoUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub profile-photo-ai-WebClient-${Environment}
+      UserPoolId: !Ref CognitoUserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+        - ALLOW_USER_SRP_AUTH
+      AllowedOAuthFlows:
+        - code
+        - implicit
+      AllowedOAuthScopes:
+        - email
+        - openid
+        - profile
+      AllowedOAuthFlowsUserPoolClient: true
+      CallbackURLs:
+        - !Ref FrontendCallbackUrl
+        - https://aigyeom.com/callback
+        - https://aigyeom.com
+        - http://localhost:3000/callback
+        - http://localhost:3000
+      LogoutURLs:
+        - https://aigyeom.com
+        - http://localhost:3000
+      SupportedIdentityProviders:
+        - COGNITO
+        - Google
+      PreventUserExistenceErrors: ENABLED
+    DependsOn:
+      - GoogleIdentityProvider
+
+  CognitoUserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: !Sub profile-photo-ai-${Environment}-${AWS::AccountId}
+      UserPoolId: !Ref CognitoUserPool
+
+  # Google Identity Provider
+  GoogleIdentityProvider:
+    Type: AWS::Cognito::UserPoolIdentityProvider
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      ProviderName: Google
+      ProviderType: Google
+      ProviderDetails:
+        client_id: !Ref GoogleOAuthClientId
+        client_secret: !Ref GoogleOAuthClientSecret
+        authorize_scopes: profile email openid
+      AttributeMapping:
+        email: email
+        name: name
+        username: sub
+  # ========================================
+  # CloudWatch Log Groups
+  # ========================================
+  # (Moved to monitoring section above with Metric Filters)
+
+  # ========================================
+  # Outputs
+  # ========================================
+
+Outputs:
+  # API Endpoints
+  ApiEndpoint:
+    Description: HTTP API Gateway endpoint URL
+    Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}
+    Export:
+      Name: !Sub ${AWS::StackName}-ApiEndpoint
+
+  # S3 Buckets
+  UploadBucketName:
+    Description: S3 bucket for raw uploads
+    Value: !Ref UploadBucket
+    Export:
+      Name: !Sub ${AWS::StackName}-UploadBucket
+
+  ResultBucketName:
+    Description: S3 bucket for final results
+    Value: !Ref ResultBucket
+    Export:
+      Name: !Sub ${AWS::StackName}-ResultBucket
+
+  # DynamoDB Tables
+  UsersTableName:
+    Description: Users DynamoDB table
+    Value: !Ref UsersTable
+    Export:
+      Name: !Sub ${AWS::StackName}-UsersTable
+
+  UsageLogTableName:
+    Description: Usage log DynamoDB table
+    Value: !Ref UsageLogTable
+    Export:
+      Name: !Sub ${AWS::StackName}-UsageLogTable
+
+  ImageJobsTableName:
+    Description: Image jobs DynamoDB table
+    Value: !Ref ImageJobsTable
+    Export:
+      Name: !Sub ${AWS::StackName}-ImageJobsTable
+
+  # SQS
+  ImageProcessQueueUrl:
+    Description: SQS queue URL for image processing
+    Value: !Ref ImageProcessQueue
+    Export:
+      Name: !Sub ${AWS::StackName}-QueueUrl
+
+  ImageProcessQueueArn:
+    Description: SQS queue ARN for image processing
+    Value: !GetAtt ImageProcessQueue.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-QueueArn
+
+  # Cognito
+  UserPoolId:
+    Description: Cognito User Pool ID
+    Value: !Ref CognitoUserPool
+    Export:
+      Name: !Sub ${AWS::StackName}-UserPoolId
+
+  UserPoolClientId:
+    Description: Cognito User Pool Client ID
+    Value: !Ref CognitoUserPoolClient
+    Export:
+      Name: !Sub ${AWS::StackName}-UserPoolClientId
+
+  # Monitoring
+  AlarmNotificationTopicArn:
+    Description: SNS Topic ARN for CloudWatch Alarm notifications
+    Value: !Ref AlarmNotificationTopic
+    Export:
+      Name: !Sub ${AWS::StackName}-AlarmNotificationTopicArn
+
+  WebhookNotifierFunctionArn:
+    Description: Lambda function ARN for webhook notifications
+    Value: !GetAtt WebhookNotifierFunction.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-WebhookNotifierFunctionArn
+
+  UserPoolDomain:
+    Description: Cognito User Pool Domain
+    Value: !Sub https://${CognitoUserPoolDomain}.auth.${AWS::Region}.amazoncognito.com
+    Export:
+      Name: !Sub ${AWS::StackName}-UserPoolDomain
+
+  # Lambda Functions
+  FileTransferFunctionArn:
+    Description: File Transfer Lambda Function ARN
+    Value: !GetAtt FileTransferFunction.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-FileTransferFunctionArn
+
+  ApiManagerFunctionArn:
+    Description: API Manager Lambda Function ARN
+    Value: !GetAtt ApiManagerFunction.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-ApiManagerFunctionArn
+
+  ImageProcessFunctionArn:
+    Description: Image Process Lambda Function ARN
+    Value: !GetAtt ImageProcessFunction.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-ImageProcessFunctionArn
+
+  # Frontend
+  FrontendBucketName:
+    Description: S3 bucket name for frontend static website
+    Value: !Ref FrontendBucket
+    Export:
+      Name: !Sub ${AWS::StackName}-FrontendBucket
+
+  CloudFrontDistributionId:
+    Description: CloudFront Distribution ID
+    Value: !Ref CloudFrontDistribution
+    Export:
+      Name: !Sub ${AWS::StackName}-CloudFrontDistributionId
+
+  CloudFrontDomainName:
+    Description: CloudFront Distribution Domain Name
+    Value: !GetAtt CloudFrontDistribution.DomainName
+    Export:
+      Name: !Sub ${AWS::StackName}-CloudFrontDomain
+
+  WebsiteURL:
+    Description: Website URL
+    Value: !If
+      - HasCustomDomain
+      - !Sub https://${DomainName}
+      - !Sub https://${CloudFrontDistribution.DomainName}
+    Export:
+      Name: !Sub ${AWS::StackName}-WebsiteURL
