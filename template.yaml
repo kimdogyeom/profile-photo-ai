@@ -769,7 +769,7 @@ Resources:
         HourlySchedule:
           Type: Schedule
           Properties:
-            Schedule: rate(1 hour) # 매 1시간마다 실행
+            Schedule: cron(0 * * * ? *) # 매 1시간마다 실행 (매시 0분)
             Description: Aggregate hourly statistics and publish custom metrics
             Enabled: true
 
