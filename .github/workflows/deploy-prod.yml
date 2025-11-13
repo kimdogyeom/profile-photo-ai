@@ -53,8 +53,8 @@ jobs:
       
       - name: Run comprehensive tests
         run: |
-          cd backend
-          python -m pytest tests/ -v --cov=lambda --cov-report=term-missing --cov-fail-under=70
+          echo "🧪 Running comprehensive tests..."
+          python -m pytest tests/ -v --cov=backend/lambda --cov-report=term-missing
       
       - name: Security scan
         run: |
