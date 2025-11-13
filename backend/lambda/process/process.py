@@ -59,7 +59,7 @@ GEMINI_API_KEY = get_gemini_api_key()
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 # 환경 변수
-RESULT_BUCKET = os.environ.get('RESULT_BUCKET', 'profilephotoai-results-final')
+RESULT_BUCKET = os.environ.get('RESULT_BUCKET', 'profile-photo-ai-results-final')
 MODEL_NAME = os.environ.get('MODEL_NAME', 'gemini-2.5-flash-image')
 WEBSOCKET_ENDPOINT = os.environ.get("WEBSOCKET_ENDPOINT")
 

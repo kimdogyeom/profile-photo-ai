@@ -3,7 +3,7 @@
     {
       "messageId": "test-message-id-12345",
       "receiptHandle": "test-receipt-handle-abcdef",
-      "body": "{\"jobId\":\"job_test123abc456\",\"userId\":\"test-user-123\",\"s3_uri\":\"s3://profilephotoai-uploads-raw-dev/uploads/test-user-123/20240101_abc123.jpg\",\"prompt\":\"Create a professional business profile photo with a clean background, good lighting, and formal attire.\",\"style\":\"custom\",\"createdAt\":\"2024-01-01T00:00:00.000Z\"}",
+      "body": "{\"jobId\":\"job_test123abc456\",\"userId\":\"test-user-123\",\"s3_uri\":\"s3://profile-photo-ai-uploads-raw-dev/uploads/test-user-123/20240101_abc123.jpg\",\"prompt\":\"Create a professional business profile photo with a clean background, good lighting, and formal attire.\",\"style\":\"custom\",\"createdAt\":\"2024-01-01T00:00:00.000Z\"}",
       "attributes": {
         "ApproximateReceiveCount": "1",
         "SentTimestamp": "1704067200000",
@@ -26,7 +26,7 @@
       },
       "md5OfBody": "e4c2d5c0e3f4a5b6c7d8e9f0a1b2c3d4",
       "eventSource": "aws:sqs",
-      "eventSourceARN": "arn:aws:sqs:ap-northeast-2:000000000000:ProfilePhotoAI-ImageProcess-dev",
+      "eventSourceARN": "arn:aws:sqs:ap-northeast-2:000000000000:Profile-Photo-AI-ImageProcess-dev",
       "awsRegion": "ap-northeast-2"
     }
   ]

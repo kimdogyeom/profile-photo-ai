@@ -129,7 +129,7 @@ def generate_logs_insights_link(alarm_name: str, namespace: str, metric_name: st
     query = ''
     
     if 'ImageProcess' in alarm_name:
-        log_group = f'/aws/lambda/ProfilePhotoAI-ImageProcess-{ENVIRONMENT}'
+        log_group = f'/aws/lambda/Profile-Photo-AI-ImageProcess-{ENVIRONMENT}'
         if 'Error' in alarm_name:
             query = 'fields @timestamp, level, event, error, errorType, jobId | filter level = "ERROR" | sort @timestamp desc | limit 20'
         elif 'Gemini' in alarm_name:
@@ -138,16 +138,16 @@ def generate_logs_insights_link(alarm_name: str, namespace: str, metric_name: st
             query = 'fields @timestamp, level, event, jobId, error | filter level = "ERROR" or level = "WARNING" | sort @timestamp desc | limit 20'
     
     elif 'ApiManager' in alarm_name:
-        log_group = f'/aws/lambda/ProfilePhotoAI-ApiManager-{ENVIRONMENT}'
+        log_group = f'/aws/lambda/Profile-Photo-AI-ApiManager-{ENVIRONMENT}'
         query = 'fields @timestamp, level, event, userId, error | filter level = "ERROR" or level = "WARNING" | sort @timestamp desc | limit 20'
     
     elif 'FileTransfer' in alarm_name:
-        log_group = f'/aws/lambda/ProfilePhotoAI-FileTransfer-{ENVIRONMENT}'
+        log_group = f'/aws/lambda/Profile-Photo-AI-FileTransfer-{ENVIRONMENT}'
         query = 'fields @timestamp, level, event, userId, error | filter level = "ERROR" or level = "WARNING" | sort @timestamp desc | limit 20'
     
     else:
         # Default query
-        log_group = f'/aws/lambda/ProfilePhotoAI-ImageProcess-{ENVIRONMENT}'
+        log_group = f'/aws/lambda/Profile-Photo-AI-ImageProcess-{ENVIRONMENT}'
         query = 'fields @timestamp, level, event, error | filter level = "ERROR" | sort @timestamp desc | limit 20'
     
     if not log_group:
