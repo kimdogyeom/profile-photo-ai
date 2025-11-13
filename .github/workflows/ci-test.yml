@@ -1,0 +1,144 @@
+name: CI Tests
+
+on:
+  pull_request:
+    branches: [ main, develop ]
+  push:
+    branches: [ develop ]
+
+jobs:
+  lint-and-test:
+    name: Lint & Test
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+          pip install pytest pytest-cov pylint black flake8
+      
+      - name: Lint Python code
+        run: |
+          echo "🔍 Running Python linters..."
+          # Black (formatting check)
+          black --check backend/ || echo "⚠️ Black formatting issues found"
+          
+          # Flake8 (style guide)
+          flake8 backend/lambda --max-line-length=120 --ignore=E501,W503 || echo "⚠️ Flake8 issues found"
+      
+      - name: Run Python unit tests
+        run: |
+          echo "🧪 Running unit tests..."
+          cd backend
+          python -m pytest tests/test_lambda_direct.py -v --cov=lambda --cov-report=term-missing
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      
+      - name: Install frontend dependencies
+        run: |
+          cd frontend
+          npm ci
+      
+      - name: Lint frontend code
+        run: |
+          cd frontend
+          npm run lint || echo "⚠️ ESLint issues found"
+      
+      - name: Build frontend
+        run: |
+          cd frontend
+          npm run build
+        env:
+          CI: false  # Warning을 에러로 취급하지 않음
+      
+      - name: Upload coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports
+          path: backend/htmlcov/
+          retention-days: 7
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+      
+      - name: Upload Trivy results to GitHub Security
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results.sarif'
+      
+      - name: Check for secrets in code
+        run: |
+          echo "🔒 Checking for exposed secrets..."
+          # AWS 키, API 키 등이 하드코딩되었는지 확인
+          if grep -r "AKIA[0-9A-Z]{16}" --exclude-dir=.git --exclude-dir=node_modules .; then
+            echo "❌ AWS Access Key found in code!"
+            exit 1
+          fi
+          if grep -r "AIza[0-9A-Za-z-_]{35}" --exclude-dir=.git --exclude-dir=node_modules .; then
+            echo "❌ Google API Key found in code!"
+            exit 1
+          fi
+          echo "✅ No secrets found"
+
+  validate-sam-template:
+    name: Validate SAM Template
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      
+      - name: Install AWS SAM CLI
+        run: |
+          pip install aws-sam-cli
+      
+      - name: Validate SAM template
+        run: |
+          sam validate --lint
+      
+      - name: Build SAM application
+        run: |
+          sam build --parallel
+      
+      - name: Upload SAM build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sam-build
+          path: .aws-sam/
+          retention-days: 1
