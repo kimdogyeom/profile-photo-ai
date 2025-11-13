@@ -39,8 +39,8 @@ jobs:
       
       - name: Run unit tests
         run: |
-          cd backend
-          python -m pytest tests/test_lambda_direct.py -v --cov=lambda
+          echo "🧪 Running unit tests..."
+          python -m pytest tests/test_lambda_direct.py -v --cov=backend/lambda --cov-report=term-missing
 
   deploy-backend:
     name: Deploy Backend (SAM)
