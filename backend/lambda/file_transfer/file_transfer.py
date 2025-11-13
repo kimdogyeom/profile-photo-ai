@@ -53,8 +53,9 @@ def lambda_handler(event, context):
         "expiresIn": 3600
     }
     """
-    # 로거 초기화
-    log = StructuredLogger('FileTransferFunction', context.aws_request_id)
+    # 로거 초기화 (테스트용 context None 처리)
+    request_id = context.aws_request_id if context else 'test-request-id'
+    log = StructuredLogger('FileTransferFunction', request_id)
     request_start_time = time.time()
     
     try:

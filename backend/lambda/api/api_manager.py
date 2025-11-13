@@ -37,6 +37,9 @@ def lambda_handler(event, context):
     - GET /user/me: 사용자 정보 조회
     - GET /user/jobs: 사용자 작업 목록 조회
     """
+    # 테스트용 context None 처리
+    request_id = context.aws_request_id if context else 'test-request-id'
+    
     try:
         # HTTP 메서드 및 경로 추출
         http_method = event.get('requestContext', {}).get('http', {}).get('method') or \
@@ -83,7 +86,8 @@ def lambda_handler(event, context):
 
 def handle_generate_image(event, context):
     """이미지 생성 요청 처리 (POST /generate)"""
-    log = StructuredLogger('ApiManagerFunction', context.aws_request_id)
+    request_id = context.aws_request_id if context else 'test-request-id'
+    log = StructuredLogger('ApiManagerFunction', request_id)
     start_time = time.time()
     
     try:
@@ -259,7 +263,8 @@ def handle_generate_image(event, context):
 
 def handle_get_job(event, context):
     """Job 상태 조회 (GET /jobs/{jobId})"""
-    log = StructuredLogger('ApiManagerFunction', context.aws_request_id)
+    request_id = context.aws_request_id if context else 'test-request-id'
+    log = StructuredLogger('ApiManagerFunction', request_id)
     
     try:
         # 사용자 ID 추출

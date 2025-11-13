@@ -125,10 +125,12 @@ def test_3_1_presigned_url():
         return False, None
 
 
-def test_3_2_image_generation(file_key):
+def test_3_2_image_generation():
     """Phase 3.2: 이미지 생성 플로우 테스트"""
     print_header("Phase 3.2: 이미지 생성 플로우 테스트")
     
+    # 이전 테스트에서 file_key 가져오기
+    result, file_key = test_3_1_presigned_url()
     if not file_key:
         print("⚠️ file_key가 없어 테스트 건너뜀")
         return False
