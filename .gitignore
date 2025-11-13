@@ -17,7 +17,6 @@ ENV/
 .aws-sam/
 samconfig.toml.bak
 packaged.yaml
-samconfig.toml
 
 # Environment variables (⚠️ NEVER commit these files!)
 .env
@@ -28,6 +27,8 @@ samconfig.toml
 env.json
 env-local.json
 env-local-host.json
+
+# Config files with secrets
 config/dev.json
 config/prod.json
 
@@ -45,8 +46,6 @@ yarn-debug.log*
 .npm
 .eslintcache
 frontend/build/
-frontend/.env
-frontend/.env.local
 build/
 dist/
 
@@ -55,18 +54,6 @@ dist/
 .idea/
 *.swp
 *.swo
-
-# GitHub metadata/workflows
-.github/
-
-# Project-level generated / local folders (user requested)
-docs/
-scripts/
-
-# Infrastructure as Code (IaC)
-Makefile
-template.yaml
-docker-compose.yml
 
 # OS
 .DS_Store
@@ -77,19 +64,23 @@ Thumbs.db
 *.tfstate.backup
 .terraform/
 
-# Secrets
+# Secrets & Credentials
 secrets.json
 *.pem
 *.key
+*.p12
+*.pfx
 
 # Logs
 logs/
 *.log
 
-# Coverage
+# Coverage & Testing
 .coverage
 htmlcov/
 .pytest_cache/
+.tox/
+coverage/
 
 # LocalStack
 .localstack/
@@ -99,6 +90,18 @@ localstack-data/
 # Temporary files
 *.tmp
 tmp/
+.cache/
+
+# GitHub Copilot instructions (keep private)
+.github/copilot-instructions.md
+
+# Backup files
+*.bak
+*backup-*.json
+
+# SAM deployment artifacts
+samconfig.toml
+
 temp/
 
 # Documentation (temporary/generated)
@@ -125,3 +128,6 @@ docker-compose.override.yml
 # Task Document
 backend/lambda/monitoring/stats_aggregator/README.md
 backend/lambda/monitoring/webhook_notifier/README.md
+
+# Documents
+docs/*
