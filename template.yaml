@@ -22,11 +22,10 @@ Globals:
 Parameters:
   Environment:
     Type: String
-    Default: dev
+    Default: development
     AllowedValues:
-      - dev
-      - staging
-      - prod
+      - development
+      - production
     Description: Environment name
 
   FrontendCallbackUrl:
@@ -76,6 +75,9 @@ Conditions:
     - !Equals
       - !Ref CertificateArn
       - ''
+  IsProduction: !Equals
+    - !Ref Environment
+    - production
 
 Resources:
   # ========================================
@@ -84,8 +86,8 @@ Resources:
 
   UploadBucket:
     Type: AWS::S3::Bucket
-    UpdateReplacePolicy: Retain
-    DeletionPolicy: Retain
+    UpdateReplacePolicy: !If [IsProduction, Retain, Delete]
+    DeletionPolicy: !If [IsProduction, Retain, Delete]
     Properties:
       BucketName: !Sub profile-photo-ai-uploads-raw-${Environment}
       CorsConfiguration:
@@ -116,8 +118,8 @@ Resources:
   # S3 Bucket Policy for Lambda access
   ResultBucket:
     Type: AWS::S3::Bucket
-    UpdateReplacePolicy: Retain
-    DeletionPolicy: Retain
+    UpdateReplacePolicy: !If [IsProduction, Retain, Delete]
+    DeletionPolicy: !If [IsProduction, Retain, Delete]
     Properties:
       BucketName: !Sub profile-photo-ai-results-final-${Environment}
       CorsConfiguration:
@@ -146,8 +148,8 @@ Resources:
   # Frontend S3 Bucket for CloudFront distribution
   FrontendBucket:
     Type: AWS::S3::Bucket
-    UpdateReplacePolicy: Retain
-    DeletionPolicy: Retain
+    UpdateReplacePolicy: !If [IsProduction, Retain, Delete]
+    DeletionPolicy: !If [IsProduction, Retain, Delete]
     Properties:
       BucketName: !Sub profile-photo-ai-frontend-${Environment}
       PublicAccessBlockConfiguration:
@@ -165,8 +167,8 @@ Resources:
   # Frontend Bucket Policy - Allow CloudFront OAI access
   FrontendBucketPolicy:
     Type: AWS::S3::BucketPolicy
-    UpdateReplacePolicy: Retain
-    DeletionPolicy: Retain
+    UpdateReplacePolicy: !If [IsProduction, Retain, Delete]
+    DeletionPolicy: !If [IsProduction, Retain, Delete]
     Properties:
       Bucket: !Ref FrontendBucket
       PolicyDocument:
@@ -184,8 +186,8 @@ Resources:
 
   LogArchiveBucket:
     Type: AWS::S3::Bucket
-    UpdateReplacePolicy: Retain
-    DeletionPolicy: Retain
+    UpdateReplacePolicy: !If [IsProduction, Retain, Delete]
+    DeletionPolicy: !If [IsProduction, Retain, Delete]
     Properties:
       BucketName: !Sub profile-photo-ai-logs-archive-${Environment}
       LifecycleConfiguration:
@@ -287,8 +289,8 @@ Resources:
 
   UsersTable:
     Type: AWS::DynamoDB::Table
-    UpdateReplacePolicy: Retain
-    DeletionPolicy: Retain
+    UpdateReplacePolicy: !If [IsProduction, Retain, Delete]
+    DeletionPolicy: !If [IsProduction, Retain, Delete]
     Properties:
       TableName: !Sub profile-photo-ai-Users-${Environment}
       BillingMode: PAY_PER_REQUEST
@@ -317,8 +319,8 @@ Resources:
 
   UsageLogTable:
     Type: AWS::DynamoDB::Table
-    UpdateReplacePolicy: Retain
-    DeletionPolicy: Retain
+    UpdateReplacePolicy: !If [IsProduction, Retain, Delete]
+    DeletionPolicy: !If [IsProduction, Retain, Delete]
     Properties:
       TableName: !Sub profile-photo-ai-UsageLog-${Environment}
       BillingMode: PAY_PER_REQUEST
@@ -337,8 +339,8 @@ Resources:
 
   ImageJobsTable:
     Type: AWS::DynamoDB::Table
-    UpdateReplacePolicy: Retain
-    DeletionPolicy: Retain
+    UpdateReplacePolicy: !If [IsProduction, Retain, Delete]
+    DeletionPolicy: !If [IsProduction, Retain, Delete]
     Properties:
       TableName: !Sub profile-photo-ai-ImageJobs-${Environment}
       BillingMode: PAY_PER_REQUEST
@@ -410,8 +412,8 @@ Resources:
 
   DynamoDBHelperLayer:
     Type: AWS::Serverless::LayerVersion
-    UpdateReplacePolicy: Retain
-    DeletionPolicy: Retain
+    UpdateReplacePolicy: !If [IsProduction, Retain, Delete]
+    DeletionPolicy: !If [IsProduction, Retain, Delete]
     Properties:
       LayerName: !Sub profile-photo-ai-DynamoDBHelper-${Environment}
       Description: DynamoDB helper functions and common utilities
