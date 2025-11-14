@@ -13,7 +13,7 @@ on:
 
 env:
   AWS_REGION: ap-northeast-2
-  ENVIRONMENT: prod
+  ENVIRONMENT: production
   STACK_NAME: profile-photo-ai-prod
 
 jobs:
