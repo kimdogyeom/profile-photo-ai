@@ -13,7 +13,7 @@ on:
 
 env:
   AWS_REGION: ap-northeast-2
-  ENVIRONMENT: production
+  ENVIRONMENT: prod
   STACK_NAME: profile-photo-ai-prod
 
 jobs:
@@ -277,7 +277,7 @@ jobs:
       - name: Deploy to S3
         run: |
           echo "📦 Deploying frontend to S3..."
-          aws s3 sync frontend/build/ s3://profile-photo-ai-frontend-prod/ --delete
+          aws s3 sync frontend/build/ s3://profile-photo-ai-frontend-production/ --delete
           echo "✅ S3 sync completed"
       
       - name: Invalidate CloudFront cache
