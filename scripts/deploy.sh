@@ -1,10 +1,10 @@
 #!/bin/bash
 # SAM 배포 자동화 스크립트
-# 사용법: ./scripts/deploy.sh [development|production] [options]
+# 사용법: ./scripts/deploy.sh [dev|prod] [options]
 
 set -e
 
-ENVIRONMENT=${1:-development}
+ENVIRONMENT=${1:-dev}
 STACK_NAME="profile-photo-ai-${ENVIRONMENT}"
 REGION="ap-northeast-2"
 
@@ -20,7 +20,7 @@ usage() {
     echo "사용법: $0 [environment] [options]"
     echo ""
     echo "Arguments:"
-    echo "  environment  배포 환경 (development|production, 기본값: development)"
+    echo "  environment  배포 환경 (dev|prod, 기본값: dev)"
     echo ""
     echo "Options:"
     echo "  --guided     대화형 배포 (첫 배포 시 사용)"
@@ -28,15 +28,15 @@ usage() {
     echo "  --rollback   이전 버전으로 롤백"
     echo ""
     echo "Examples:"
-    echo "  $0 development"
-    echo "  $0 production --guided"
-    echo "  $0 development --rollback"
+    echo "  $0 dev"
+    echo "  $0 prod --guided"
+    echo "  $0 dev --rollback"
     exit 1
 }
 
 # 환경 검증
-if [[ ! "$ENVIRONMENT" =~ ^(development|production)$ ]]; then
-    echo -e "${RED}❌ 에러: 환경은 'development' 또는 'production'이어야 합니다.${NC}"
+if [[ ! "$ENVIRONMENT" =~ ^(dev|prod)$ ]]; then
+    echo -e "${RED}❌ 에러: 환경은 'dev' 또는 'prod'이어야 합니다.${NC}"
     usage
 fi
 

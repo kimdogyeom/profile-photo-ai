@@ -22,10 +22,10 @@ Globals:
 Parameters:
   Environment:
     Type: String
-    Default: development
+    Default: dev
     AllowedValues:
-      - development
-      - production
+      - dev
+      - prod
     Description: Environment name
 
   FrontendCallbackUrl:
