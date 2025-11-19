@@ -17,7 +17,7 @@ const config = {
   },
   
   // Environment
-  environment: process.env.REACT_APP_ENVIRONMENT || 'development',
+  environment: process.env.REACT_APP_ENVIRONMENT || 'dev',
   
   // OAuth Providers
   oauthProviders: {
@@ -74,8 +74,8 @@ export const getCognitoLogoutUrl = () => {
     `logout_uri=${encodeURIComponent(logoutUri)}`;
 };
 
-// Log configuration in development
-if (config.environment === 'development') {
+// Log configuration in dev
+if (config.environment === 'dev') {
   console.log('🔧 AWS Config:', {
     apiEndpoint: config.apiEndpoint,
     region: config.region,
