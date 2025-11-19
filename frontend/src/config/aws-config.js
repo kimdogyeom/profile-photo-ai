@@ -3,7 +3,7 @@
 
 const config = {
   // API Gateway - MUST be set via environment variables
-  apiEndpoint: process.env.REACT_APP_API_ENDPOINT || '',
+  apiEndpoint: process.env.REACT_APP_API_BASE_URL || '',
   
   // AWS Region
   region: process.env.REACT_APP_AWS_REGION || 'ap-northeast-2',
