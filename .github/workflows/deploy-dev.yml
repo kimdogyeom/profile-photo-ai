@@ -48,7 +48,7 @@ jobs:
     if: always() && (needs.test.result == 'success' || needs.test.result == 'skipped')
     runs-on: ubuntu-latest
     environment:
-      name: development
+      name: dev
       url: https://dev.aigyeom.com
     permissions:
       id-token: write
@@ -150,7 +150,7 @@ jobs:
     needs: deploy-backend
     runs-on: ubuntu-latest
     environment:
-      name: development
+      name: dev
     permissions:
       id-token: write
       contents: read

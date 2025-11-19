@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       confirmation:
-        description: 'Type "DEPLOY" to confirm production deployment'
+        description: 'Type "DEPLOY" to confirm prod deployment'
         required: true
 
 env:
@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch'
     environment:
-      name: production
+      name: prod
     
     steps:
       - name: Check confirmation
@@ -37,7 +37,7 @@ jobs:
     name: Run Full Test Suite
     runs-on: ubuntu-latest
     environment:
-      name: production
+      name: prod
     
     steps:
       - name: Checkout code
@@ -76,11 +76,11 @@ jobs:
     if: needs.test.result == 'success'
     runs-on: ubuntu-latest
     environment:
-      name: production
+      name: prod
       url: https://aigyeom.com
     permissions:
       id-token: write
-      contents: read
+      contents: write
     
     steps:
       - name: Checkout code
@@ -103,7 +103,7 @@ jobs:
       
       - name: Build SAM application
         run: |
-          echo "📦 Building SAM application for production..."
+          echo "📦 Building SAM application for prod..."
           sam build --parallel
       
       - name: Create backup tag
@@ -132,9 +132,9 @@ jobs:
           echo "client_secret=$CLIENT_SECRET" >> $GITHUB_OUTPUT
           echo "✅ OAuth credentials loaded"
       
-      - name: Deploy to AWS Production
+      - name: Deploy to AWS Prod
         run: |
-          echo "🚀 Deploying to PRODUCTION..."
+          echo "🚀 Deploying to PROD..."
           
           # Get Discord Monitoring Webhook URL from GitHub Secrets (optional)
           DISCORD_MONITORING_WEBHOOK="${{ secrets.DISCORD_MONITORING_WEBHOOK_URL }}"
@@ -172,9 +172,9 @@ jobs:
           echo "api_url=$API_URL" >> $GITHUB_OUTPUT
           echo "✅ API Gateway URL: $API_URL"
       
-      - name: Run production smoke tests
+      - name: Run prod smoke tests
         run: |
-          echo "🧪 Running production smoke tests..."
+          echo "🧪 Running prod smoke tests..."
           API_URL="${{ steps.stack-outputs.outputs.api_url }}"
           
           # Health check with retry
@@ -195,15 +195,15 @@ jobs:
           echo "Creating release tag: v$VERSION"
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
-          git tag -a "v$VERSION" -m "Production release $VERSION"
+          git tag -a "v$VERSION" -m "Prod release $VERSION"
           git push origin "v$VERSION" || echo "Tag already exists"
 
   deploy-frontend:
-    name: Deploy Frontend to Production
+    name: Deploy Frontend to Prod
     needs: deploy-backend
     runs-on: ubuntu-latest
     environment:
-      name: production
+      name: prod
     permissions:
       id-token: write
       contents: read
@@ -250,7 +250,7 @@ jobs:
           echo "user_pool_id=$USER_POOL_ID" >> $GITHUB_OUTPUT
           echo "client_id=$CLIENT_ID" >> $GITHUB_OUTPUT
       
-      - name: Create production .env
+      - name: Create prod .env
         run: |
           cd frontend
           cat > .env.production << EOF
@@ -258,7 +258,7 @@ jobs:
           REACT_APP_AWS_REGION=${{ env.AWS_REGION }}
           REACT_APP_USER_POOL_ID=${{ steps.backend-config.outputs.user_pool_id }}
           REACT_APP_USER_POOL_CLIENT_ID=${{ steps.backend-config.outputs.client_id }}
-          REACT_APP_ENV=production
+          REACT_APP_ENV=prod
           EOF
       
       - name: Install dependencies
@@ -266,7 +266,7 @@ jobs:
           cd frontend
           npm ci --production=false
       
-      - name: Build production frontend
+      - name: Build prod frontend
         run: |
           cd frontend
           npm run build
@@ -302,7 +302,7 @@ jobs:
     name: Rollback on Failure
     needs: [deploy-backend, deploy-frontend]
     environment:
-      name: production
+      name: prod
     if: failure()
     runs-on: ubuntu-latest
     permissions:
@@ -340,22 +340,22 @@ jobs:
           if [ "$BACKEND_STATUS" = "success" ] && [ "$FRONTEND_STATUS" = "success" ]; then
             COLOR="3066993"  # Green
             EMOJI="✅"
-            MESSAGE="Production deployment successful!"
+            MESSAGE="Prod deployment successful!"
           else
             COLOR="15158332"  # Red
             EMOJI="❌"
-            MESSAGE="Production deployment failed!"
+            MESSAGE="Prod deployment failed!"
           fi
           
           curl -H "Content-Type: application/json" \
             -d "{
               \"content\": \"@here\",
               \"embeds\": [{
-                \"title\": \"$EMOJI Production Deployment\",
+                \"title\": \"$EMOJI Prod Deployment\",
                 \"description\": \"$MESSAGE\n\n**Backend:** $BACKEND_STATUS\n**Frontend:** $FRONTEND_STATUS\n**Commit:** ${{ github.sha }}\",
                 \"color\": $COLOR,
                 \"footer\": {
-                  \"text\": \"ProfilePhotoAI Production\"
+                  \"text\": \"ProfilePhotoAI Prod\"
                 }
               }]
             }" \
