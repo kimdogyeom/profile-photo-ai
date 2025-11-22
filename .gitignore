@@ -131,3 +131,6 @@ backend/lambda/monitoring/webhook_notifier/README.md
 
 # Documents
 docs/*
+
+#IAM policies
+iam-policies/*
