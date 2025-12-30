@@ -11,18 +11,26 @@ from PIL import Image
 from io import BytesIO
 from datetime import datetime
 
-# Lambda Layer에서 dynamodb_helper 및 logging_helper 임포트
+# AWS Lambda Powertools
+from aws_lambda_powertools import Logger, Tracer, Metrics
+from aws_lambda_powertools.metrics import MetricUnit
+
+# Lambda Layer에서 dynamodb_helper 임포트
 sys.path.append('/opt/python')
 from dynamodb_helper import ImageJobService, UserService
-from logging_helper import StructuredLogger
+
+# Powertools 초기화
+logger = Logger()
+tracer = Tracer()
+metrics = Metrics()
 
 # AWS 클라이언트 초기화 (LocalStack 지원)
 endpoint_url = os.environ.get('AWS_ENDPOINT_URL')
 if endpoint_url:
-    print(f"Using LocalStack S3 endpoint: {endpoint_url}")
+    logger.info("Using LocalStack S3 endpoint", extra={"endpoint_url": endpoint_url})
     s3_client = boto3.client('s3', endpoint_url=endpoint_url)
 else:
-    print("Using AWS S3")
+    logger.info("Using AWS S3")
     s3_client = boto3.client('s3')
 
 secretsmanager_client = boto3.client('secretsmanager')
@@ -68,13 +76,14 @@ if WEBSOCKET_ENDPOINT:
     api_gateway_client = boto3.client('apigatewaymanagementapi', endpoint_url=WEBSOCKET_ENDPOINT)
 
 
+@logger.inject_lambda_context
+@tracer.capture_lambda_handler
+@metrics.log_metrics
 def lambda_handler(event, context):
     """
     SQS 메시지를 처리하여 Gemini API로 이미지를 생성하고 결과를 S3에 저장합니다.
     DynamoDB에 작업 상태를 업데이트하고, WebSocket이 있으면 실시간 알림을 전송합니다.
     """
-    request_id = context.aws_request_id if context else 'test-request-id'
-    log = StructuredLogger('ImageProcessFunction', request_id)
     processed_count = 0
     failed_count = 0
     

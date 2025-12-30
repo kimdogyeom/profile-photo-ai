@@ -6,17 +6,22 @@ import uuid
 from datetime import datetime
 import time
 
-# Lambda Layer import
-sys.path.append('/opt/python')
-from logging_helper import StructuredLogger
+# AWS Lambda Powertools
+from aws_lambda_powertools import Logger, Tracer, Metrics
+from aws_lambda_powertools.logging import correlation_paths
+
+# Powertools 초기화
+logger = Logger()
+tracer = Tracer()
+metrics = Metrics()
 
 # AWS 클라이언트 초기화 (LocalStack 지원)
 endpoint_url = os.environ.get('AWS_ENDPOINT_URL')
 if endpoint_url:
-    print(f"Using LocalStack S3 endpoint: {endpoint_url}")
+    logger.info("Using LocalStack S3 endpoint", extra={"endpoint_url": endpoint_url})
     s3_client = boto3.client('s3', endpoint_url=endpoint_url)
 else:
-    print("Using AWS S3")
+    logger.info("Using AWS S3")
     s3_client = boto3.client('s3')
 
 # 환경 변수
@@ -35,6 +40,9 @@ ALLOWED_CONTENT_TYPES = {
 MAX_FILE_SIZE = 10 * 1024 * 1024
 
 
+@logger.inject_lambda_context(correlation_id_path=correlation_paths.API_GATEWAY_HTTP)
+@tracer.capture_lambda_handler
+@metrics.log_metrics
 def lambda_handler(event, context):
     """
     클라이언트의 파일 업로드 요청을 받아 S3 Presigned URL을 생성하여 반환합니다.
@@ -53,9 +61,7 @@ def lambda_handler(event, context):
         "expiresIn": 3600
     }
     """
-    # 로거 초기화 (테스트용 context None 처리)
-    request_id = context.aws_request_id if context else 'test-request-id'
-    log = StructuredLogger('FileTransferFunction', request_id)
+    # 요청 시작 시간 기록
     request_start_time = time.time()
     
     try:
@@ -171,7 +177,7 @@ def extract_user_id(event):
         
         return user_id
     except Exception as e:
-        print(f"Error extracting user ID: {e}")
+        logger.error("Error extracting user ID", extra={"error": str(e)})
         return None
 
 
@@ -183,7 +189,7 @@ def parse_request_body(event):
             return json.loads(body)
         return body
     except json.JSONDecodeError as e:
-        print(f"Error parsing request body: {e}")
+        logger.error("Error parsing request body", extra={"error": str(e)})
         return None
 
 
@@ -255,7 +261,7 @@ def generate_presigned_upload_url(bucket, key, content_type, expiration):
         )
         return presigned_url
     except Exception as e:
-        print(f"Error generating presigned URL: {e}")
+        logger.error("Error generating presigned URL", extra={"error": str(e)})
         raise
 
 

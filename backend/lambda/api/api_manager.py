@@ -6,19 +6,28 @@ import time
 from datetime import datetime
 from decimal import Decimal
 
-# Lambda Layer에서 dynamodb_helper 및 logging_helper 임포트
+# AWS Lambda Powertools
+from aws_lambda_powertools import Logger, Tracer, Metrics
+from aws_lambda_powertools.logging import correlation_paths
+from aws_lambda_powertools.metrics import MetricUnit
+
+# Lambda Layer에서 dynamodb_helper 임포트
 sys.path.append('/opt/python')
 from dynamodb_helper import UserService, UsageService, ImageJobService
-from logging_helper import StructuredLogger
+
+# Powertools 초기화
+logger = Logger()
+tracer = Tracer()
+metrics = Metrics()
 
 # AWS 클라이언트 초기화 (LocalStack 지원)
 endpoint_url = os.environ.get('AWS_ENDPOINT_URL')
 if endpoint_url:
-    print(f"Using LocalStack endpoint: {endpoint_url}")
+    logger.info("Using LocalStack endpoint", extra={"endpoint_url": endpoint_url})
     sqs_client = boto3.client('sqs', endpoint_url=endpoint_url)
     s3_client = boto3.client('s3', endpoint_url=endpoint_url)
 else:
-    print("Using AWS services")
+    logger.info("Using AWS services")
     sqs_client = boto3.client('sqs')
     s3_client = boto3.client('s3')
 
@@ -27,6 +36,9 @@ SQS_QUEUE_URL = os.environ.get('SQS_QUEUE_URL')
 UPLOAD_BUCKET = os.environ.get('UPLOAD_BUCKET', 'profilephotoai-uploads-raw')
 
 
+@logger.inject_lambda_context(correlation_id_path=correlation_paths.API_GATEWAY_HTTP)
+@tracer.capture_lambda_handler
+@metrics.log_metrics
 def lambda_handler(event, context):
     """
     API Gateway 요청을 라우팅하여 적절한 핸들러로 전달합니다.
@@ -52,7 +64,7 @@ def lambda_handler(event, context):
         if stage and raw_path.startswith(f'/{stage}/'):
             raw_path = raw_path[len(f'/{stage}'):]
         
-        print(f"Request: {http_method} {raw_path}")
+        logger.info("Processing request", extra={"method": http_method, "path": raw_path})
         
         # OPTIONS 처리 (CORS preflight)
         if http_method == 'OPTIONS':
@@ -86,8 +98,6 @@ def lambda_handler(event, context):
 
 def handle_generate_image(event, context):
     """이미지 생성 요청 처리 (POST /generate)"""
-    request_id = context.aws_request_id if context else 'test-request-id'
-    log = StructuredLogger('ApiManagerFunction', request_id)
     start_time = time.time()
     
     try:
@@ -263,8 +273,6 @@ def handle_generate_image(event, context):
 
 def handle_get_job(event, context):
     """Job 상태 조회 (GET /jobs/{jobId})"""
-    request_id = context.aws_request_id if context else 'test-request-id'
-    log = StructuredLogger('ApiManagerFunction', request_id)
     
     try:
         # 사용자 ID 추출
