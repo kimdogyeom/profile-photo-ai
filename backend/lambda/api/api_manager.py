@@ -90,12 +90,11 @@ def lambda_handler(event, context):
         return cors_response(404, {'error': 'Not Found'})
         
     except Exception as e:
-        print(f"Error in lambda_handler: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.exception("Error in lambda_handler")
         return cors_response(500, {'error': f'Internal server error: {str(e)}'})
 
 
+@tracer.capture_method
 def handle_generate_image(event, context):
     """이미지 생성 요청 처리 (POST /generate)"""
     start_time = time.time()
@@ -104,9 +103,12 @@ def handle_generate_image(event, context):
         # Cognito 사용자 ID 추출
         user_id = extract_user_id(event)
         if not user_id:
-            log.error('user_id_not_found',
+            logger.error('user_id_not_found',
                 requestContext=event.get('requestContext', {}))
             return cors_response(401, {'error': 'Unauthorized: User ID not found'})
+        
+        # 사용자 컨텍스트를 모든 로그에 추가
+        logger.append_keys(userId=user_id)
         
         # 요청 본문 파싱
         body = parse_request_body(event)
@@ -271,6 +273,7 @@ def handle_generate_image(event, context):
         return cors_response(500, {'error': f'Internal server error: {str(e)}'})
 
 
+@tracer.capture_method
 def handle_get_job(event, context):
     """Job 상태 조회 (GET /jobs/{jobId})"""
     
@@ -371,6 +374,7 @@ def handle_get_job(event, context):
         return cors_response(500, {'error': f'Internal server error: {str(e)}'})
 
 
+@tracer.capture_method
 def handle_get_user_info(event, context):
     """사용자 정보 조회 (GET /user/me)"""
     try:
@@ -411,12 +415,11 @@ def handle_get_user_info(event, context):
         return cors_response(200, response)
         
     except Exception as e:
-        print(f"Error getting user info: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.exception("Error getting user info")
         return cors_response(500, {'error': f'Internal server error: {str(e)}'})
 
 
+@tracer.capture_method
 def handle_get_user_jobs(event, context):
     """사용자 작업 목록 조회 (GET /user/jobs)"""
     try:
@@ -496,12 +499,11 @@ def handle_get_user_jobs(event, context):
         return cors_response(200, response)
         
     except Exception as e:
-        print(f"Error getting user jobs: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.exception("Error getting user jobs")
         return cors_response(500, {'error': f'Internal server error: {str(e)}'})
 
 
+@tracer.capture_method
 def handle_download_image(event, context):
     """이미지 다운로드 Presigned URL 생성 (GET /jobs/{jobId}/download)"""
     try:
@@ -568,9 +570,7 @@ def handle_download_image(event, context):
         })
         
     except Exception as e:
-        print(f"Error generating download URL: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.exception("Error generating download URL")
         return cors_response(500, {'error': f'Internal server error: {str(e)}'})
 
 
