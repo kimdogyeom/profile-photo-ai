@@ -9,7 +9,6 @@ from decimal import Decimal
 # AWS Lambda Powertools
 from aws_lambda_powertools import Logger, Tracer, Metrics
 from aws_lambda_powertools.logging import correlation_paths
-from aws_lambda_powertools.metrics import MetricUnit
 
 # Lambda Layer에서 dynamodb_helper 임포트
 sys.path.append('/opt/python')
@@ -54,6 +53,13 @@ def lambda_handler(event, context):
     
     try:
         # HTTP 메서드 및 경로 추출
+        # API Gateway HTTP API를 선택한 이유 (3줄 요약)
+        # 1. 비용 효율성
+        # REST API $3.50 → HTTP API $1.00 (per million requests) - 70% 절감
+        # 2. Cognito JWT 네이티브 지원
+        # JWT Authorizer 자동 검증 (REST API는 Lambda Authorizer 추가 필요)
+        # 3. 서버리스 최적화
+        # 순수 Lambda 기반 프로젝트에 경량/저지연 설계 적합
         http_method = event.get('requestContext', {}).get('http', {}).get('method') or \
                      event.get('requestContext', {}).get('httpMethod')
         raw_path = event.get('rawPath') or event.get('path', '')
@@ -92,7 +98,7 @@ def lambda_handler(event, context):
     except Exception as e:
         logger.exception("Error in lambda_handler")
         return cors_response(500, {'error': f'Internal server error: {str(e)}'})
-
+    
 
 @tracer.capture_method
 def handle_generate_image(event, context):
@@ -113,7 +119,7 @@ def handle_generate_image(event, context):
         # 요청 본문 파싱
         body = parse_request_body(event)
         if not body:
-            log.error('invalid_request_body',
+            logger.error('invalid_request_body',
                 userId=user_id,
                 body=event.get('body', '')[:100])
             return cors_response(400, {'error': 'Invalid request body'})
@@ -123,7 +129,7 @@ def handle_generate_image(event, context):
         style = body.get('style', 'custom')  # 프론트엔드에서 선택한 스타일
         
         # Job 생성 요청 로깅
-        log.info('job_create_request',
+        logger.info('job_create_request',
             userId=user_id,
             fileKey=file_key,
             style=style,
@@ -132,7 +138,7 @@ def handle_generate_image(event, context):
         # 입력 검증
         validation_error = validate_generation_request(file_key, prompt)
         if validation_error:
-            log.warning('validation_failed',
+            logger.warning('validation_failed',
                 userId=user_id,
                 fileKey=file_key,
                 reason=validation_error)
@@ -140,7 +146,7 @@ def handle_generate_image(event, context):
         
         # S3 파일 존재 확인
         if not verify_s3_file_exists(UPLOAD_BUCKET, file_key):
-            log.warning('s3_file_not_found',
+            logger.warning('s3_file_not_found',
                 userId=user_id,
                 bucket=UPLOAD_BUCKET,
                 fileKey=file_key)
@@ -152,14 +158,14 @@ def handle_generate_image(event, context):
             # 신규 사용자 생성 (Cognito 정보로부터)
             user_data = extract_user_data(event)
             user = UserService.create_or_update_user(user_data)
-            log.info('user_created',
+            logger.info('user_created',
                 userId=user_id,
                 email=user_data.get('email'))
         
         # 사용량 체크
         can_generate, remaining = UsageService.can_generate_image(user_id)
         if not can_generate:
-            log.warning('quota_exceeded',
+            logger.warning('quota_exceeded',
                 userId=user_id,
                 currentUsage=UsageService.DAILY_LIMIT,
                 dailyLimit=UsageService.DAILY_LIMIT,
@@ -181,7 +187,7 @@ def handle_generate_image(event, context):
             prompt=prompt
         )
         
-        log.info('job_created',
+        logger.info('job_created',
             jobId=job_id,
             userId=user_id,
             style=style,
@@ -213,7 +219,7 @@ def handle_generate_image(event, context):
                 }
             )
             
-            log.info('sqs_publish_success',
+            logger.info('sqs_publish_success',
                 jobId=job_id,
                 userId=user_id,
                 messageId=sqs_response['MessageId'])
@@ -222,7 +228,7 @@ def handle_generate_image(event, context):
             new_usage = UsageService.increment_usage(user_id)
             remaining_quota = UsageService.DAILY_LIMIT - new_usage
             
-            log.info('usage_incremented',
+            logger.info('usage_incremented',
                 userId=user_id,
                 currentUsage=new_usage,
                 remainingQuota=remaining_quota)
@@ -237,7 +243,7 @@ def handle_generate_image(event, context):
             # 처리 시간 측정
             processing_time = (time.time() - start_time) * 1000
             
-            log.info('job_queued',
+            logger.info('job_queued',
                 jobId=job_id,
                 userId=user_id,
                 processingTime=processing_time)
@@ -252,7 +258,7 @@ def handle_generate_image(event, context):
             
         except Exception as sqs_error:
             # SQS 발행 실패 시 Job을 failed로 표시
-            log.error('sqs_publish_failed',
+            logger.error('sqs_publish_failed',
                 error=sqs_error,
                 jobId=job_id,
                 userId=user_id)
@@ -267,7 +273,7 @@ def handle_generate_image(event, context):
             })
         
     except Exception as e:
-        log.error('job_creation_failed',
+        logger.error('job_creation_failed',
             error=e,
             userId=user_id if 'user_id' in locals() else None)
         return cors_response(500, {'error': f'Internal server error: {str(e)}'})
@@ -281,7 +287,7 @@ def handle_get_job(event, context):
         # 사용자 ID 추출
         user_id = extract_user_id(event)
         if not user_id:
-            log.error('user_id_not_found')
+            logger.error('user_id_not_found')
             return cors_response(401, {'error': 'Unauthorized: User ID not found'})
         
         # Path에서 jobId 추출
@@ -289,11 +295,11 @@ def handle_get_job(event, context):
         job_id = raw_path.split('/')[-1]
         
         if not job_id:
-            log.warning('job_id_missing',
+            logger.warning('job_id_missing',
                 userId=user_id)
             return cors_response(400, {'error': 'jobId is required'})
         
-        log.info('job_status_query',
+        logger.info('job_status_query',
             jobId=job_id,
             userId=user_id)
         
@@ -301,20 +307,20 @@ def handle_get_job(event, context):
         job = ImageJobService.get_job(job_id)
         
         if not job:
-            log.warning('job_not_found',
+            logger.warning('job_not_found',
                 jobId=job_id,
                 userId=user_id)
             return cors_response(404, {'error': 'Job not found'})
         
         # 권한 확인: 본인의 Job만 조회 가능
         if job.get('userId') != user_id:
-            log.warning('job_access_denied',
+            logger.warning('job_access_denied',
                 jobId=job_id,
                 userId=user_id,
                 jobOwner=job.get('userId'))
             return cors_response(403, {'error': 'Forbidden: Access denied'})
         
-        log.info('job_retrieved',
+        logger.info('job_retrieved',
             jobId=job_id,
             userId=user_id,
             status=job.get('status'))
@@ -354,11 +360,11 @@ def handle_get_job(event, context):
                         ExpiresIn=86400  # 24시간
                     )
                     job['outputImageUrl'] = presigned_url
-                    log.info('presigned_url_generated',
+                    logger.info('presigned_url_generated',
                         jobId=job_id,
                         key=output_key)
                 except Exception as e:
-                    log.warning('presigned_url_generation_failed',
+                    logger.warning('presigned_url_generation_failed',
                         jobId=job_id,
                         error=str(e))
                     job['outputImageUrl'] = None
@@ -367,7 +373,7 @@ def handle_get_job(event, context):
         return cors_response(200, job)
         
     except Exception as e:
-        log.error('job_retrieval_failed',
+        logger.error('job_retrieval_failed',
             error=e,
             jobId=job_id if 'job_id' in locals() else None,
             userId=user_id if 'user_id' in locals() else None)
