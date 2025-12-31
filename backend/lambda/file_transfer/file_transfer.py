@@ -1,11 +1,10 @@
-import boto3
 import json
 import os
-import sys
+import time
 import uuid
 from datetime import datetime
-import time
 
+import boto3
 # AWS Lambda Powertools
 from aws_lambda_powertools import Logger, Tracer, Metrics
 from aws_lambda_powertools.logging import correlation_paths
@@ -68,14 +67,14 @@ def lambda_handler(event, context):
         # Cognito 사용자 ID 추출
         user_id = extract_user_id(event)
         if not user_id:
-            log.error('user_id_not_found',
+            logger.error('user_id_not_found',
                 requestContext=event.get('requestContext', {}))
             return error_response(401, "Unauthorized: User ID not found")
         
         # 요청 본문 파싱
         body = parse_request_body(event)
         if not body:
-            log.error('invalid_request_body',
+            logger.error('invalid_request_body',
                 userId=user_id,
                 body=event.get('body', '')[:100])  # 처음 100자만 로깅
             return error_response(400, "Invalid request body")
@@ -85,7 +84,7 @@ def lambda_handler(event, context):
         file_size = body.get('fileSize', 0)
         
         # 업로드 요청 로깅
-        log.info('upload_request',
+        logger.info('upload_request',
             userId=user_id,
             fileName=file_name,
             contentType=content_type,
@@ -94,7 +93,7 @@ def lambda_handler(event, context):
         # 입력 검증
         validation_error = validate_upload_request(file_name, content_type, file_size)
         if validation_error:
-            log.warning('validation_failed',
+            logger.warning('validation_failed',
                 userId=user_id,
                 fileName=file_name,
                 contentType=content_type,
@@ -120,7 +119,7 @@ def lambda_handler(event, context):
         processing_time = (time.time() - request_start_time) * 1000  # ms
         
         # 성공 로깅
-        log.info('presigned_url_created',
+        logger.info('presigned_url_created',
             userId=user_id,
             fileKey=file_key,
             bucket=UPLOAD_BUCKET,
@@ -145,7 +144,7 @@ def lambda_handler(event, context):
         }
         
     except Exception as e:
-        log.error('presigned_url_failed',
+        logger.error('presigned_url_failed',
             error=e,
             userId=user_id if 'user_id' in locals() else None)
         return error_response(500, f"Internal server error: {str(e)}")
