@@ -1,6 +1,6 @@
 """
 통계 집계 Lambda 함수
-매 1시간마다 실행되어 CloudWatch Logs를 분석하고 Custom Metrics를 발행합니다.
+매일 1회 실행되어 CloudWatch Logs를 분석하고 리포트를 생성합니다.
 """
 
 import boto3
@@ -9,56 +9,74 @@ import os
 import time
 from datetime import datetime, timedelta
 from typing import List, Dict, Any
+import requests
+
+# AWS Lambda Powertools
+from aws_lambda_powertools import Logger
+
+# Powertools 초기화
+logger = Logger()
 
 logs_client = boto3.client('logs')
-cloudwatch_client = boto3.client('cloudwatch')
 
 ENVIRONMENT = os.environ.get('ENVIRONMENT', 'dev')
-LOG_GROUP_NAME = f'/aws/lambda/Profile-Photo-AI-ImageProcess-{ENVIRONMENT}'
-NAMESPACE = f'ProfilePhotoAI/{ENVIRONMENT}/Statistics'
+LOG_GROUP_NAME = f'/aws/lambda/profile-photo-ai-ImageProcess-{ENVIRONMENT}'
+DISCORD_WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL', '')
 
 
+@logger.inject_lambda_context
 def lambda_handler(event, context):
     """
-    1시간 단위로 실행되어 통계를 집계하고 Custom Metrics 발행
+    매일 1회 실행되어 지난 24시간 통계를 집계하고 비즈니스 리포트 생성
     """
-    print(f"Starting statistics aggregation for environment: {ENVIRONMENT}")
+    logger.info("일일 리포트 생성 시작", environment=ENVIRONMENT)
     
-    # 1시간 전부터 현재까지의 데이터 수집
+    # 지난 24시간 데이터 수집
     end_time = datetime.utcnow()
-    start_time = end_time - timedelta(hours=1)
+    start_time = end_time - timedelta(hours=24)
     
-    print(f"Query period: {start_time.isoformat()} to {end_time.isoformat()}")
+    logger.info("조회 기간", start=start_time.isoformat(), end=end_time.isoformat())
     
     try:
         # 1. 스타일별 이미지 생성 수 집계
-        print("Querying style statistics...")
+        logger.info("스타일별 통계 조회 중")
         style_stats = query_style_statistics(start_time, end_time)
-        publish_style_metrics(style_stats)
-        print(f"Published {len(style_stats)} style metrics")
         
-        # 2. Gemini API 응답 시간 통계
-        print("Querying API response times...")
-        api_response_time = query_api_response_times(start_time, end_time)
-        publish_response_time_metrics(api_response_time)
-        print("Published API response time metrics")
+        # 2. 시간대별 사용 패턴
+        logger.info("시간대별 패턴 조회 중")
+        hourly_pattern = query_hourly_pattern(start_time, end_time)
         
         # 3. 성공률 및 실패 원인 분석
-        print("Querying success rate...")
+        logger.info("성공률 조회 중")
         success_rate = query_success_rate(start_time, end_time)
-        publish_success_rate_metrics(success_rate)
-        print("Published success rate metrics")
         
         # 4. 처리 시간 통계
-        print("Querying processing times...")
+        logger.info("처리 시간 통계 조회 중")
         processing_times = query_processing_times(start_time, end_time)
-        publish_processing_time_metrics(processing_times)
-        print("Published processing time metrics")
+        
+        # 5. 실패 원인 분석
+        logger.info("실패 원인 조회 중")
+        failure_reasons = query_failure_reasons(start_time, end_time)
+        
+        # 리포트 생성
+        report = generate_report(
+            start_time, end_time,
+            style_stats, hourly_pattern, success_rate, 
+            processing_times, failure_reasons
+        )
+        
+        # Discord로 리포트 전송
+        if DISCORD_WEBHOOK_URL:
+            send_discord_report(report)
+            logger.info("Discord로 리포트 전송 완료")
+        else:
+            logger.warning("Discord Webhook이 설정되지 않음. 리포트는 로그에만 기록됨")
+            logger.info("일일 리포트", report=report)
         
         return {
             'statusCode': 200,
             'body': json.dumps({
-                'message': 'Statistics aggregated successfully',
+                'message': '일일 리포트 생성 완료',
                 'timestamp': end_time.isoformat(),
                 'period': {
                     'start': start_time.isoformat(),
@@ -68,14 +86,12 @@ def lambda_handler(event, context):
         }
         
     except Exception as e:
-        print(f"Error aggregating statistics: {str(e)}")
-        import traceback
-        traceback.print_exc()
+        logger.exception("일일 리포트 생성 중 오류 발생", error=str(e))
         
         return {
             'statusCode': 500,
             'body': json.dumps({
-                'message': 'Failed to aggregate statistics',
+                'message': '일일 리포트 생성 실패',
                 'error': str(e)
             })
         }
@@ -94,19 +110,14 @@ def query_style_statistics(start_time: datetime, end_time: datetime) -> List[Lis
     return run_logs_insights_query(query, start_time, end_time)
 
 
-def query_api_response_times(start_time: datetime, end_time: datetime) -> List[List[Dict[str, str]]]:
+def query_hourly_pattern(start_time: datetime, end_time: datetime) -> List[List[Dict[str, str]]]:
     """
-    Gemini API 응답 시간 통계 (평균, p50, p95, p99)
+    시간대별 사용 패턴
     """
     query = """
-    fields @timestamp, responseTime
-    | filter event = "gemini_api_success"
-    | stats avg(responseTime) as avg_time, 
-            pct(responseTime, 50) as p50, 
-            pct(responseTime, 95) as p95, 
-            pct(responseTime, 99) as p99,
-            max(responseTime) as max_time,
-            min(responseTime) as min_time
+    fields @timestamp
+    | filter event = "job_completed"
+    | stats count() as count by bin(1h) as hour
     """
     
     return run_logs_insights_query(query, start_time, end_time)
@@ -133,13 +144,24 @@ def query_processing_times(start_time: datetime, end_time: datetime) -> List[Lis
     전체 처리 시간 통계 (다운로드 + 생성 + 업로드)
     """
     query = """
-    fields @timestamp, processingTime, generationTime, downloadTime, uploadTime
+    fields @timestamp, processingTime
     | filter event = "job_completed"
     | stats avg(processingTime) as avg_total,
-            avg(generationTime) as avg_generation,
-            avg(downloadTime) as avg_download,
-            avg(uploadTime) as avg_upload,
-            pct(processingTime, 95) as p95_total
+            pct(processingTime, 50) as p50,
+            pct(processingTime, 95) as p95
+    """
+    
+    return run_logs_insights_query(query, start_time, end_time)
+
+
+def query_failure_reasons(start_time: datetime, end_time: datetime) -> List[List[Dict[str, str]]]:
+    """
+    실패 원인별 집계
+    """
+    query = """
+    fields @timestamp, errorType
+    | filter event = "job_failed"
+    | stats count() as count by errorType
     """
     
     return run_logs_insights_query(query, start_time, end_time)
@@ -150,6 +172,8 @@ def run_logs_insights_query(query: str, start_time: datetime, end_time: datetime
     CloudWatch Logs Insights 쿼리 실행
     """
     try:
+        logger.debug("Logs Insights 쿼리 시작", query_preview=query[:100])
+        
         # 쿼리 시작
         response = logs_client.start_query(
             logGroupName=LOG_GROUP_NAME,
@@ -159,7 +183,7 @@ def run_logs_insights_query(query: str, start_time: datetime, end_time: datetime
         )
         
         query_id = response['queryId']
-        print(f"Started query {query_id}")
+        logger.debug("쿼리 시작됨", query_id=query_id)
         
         # 쿼리 완료 대기 (최대 30초)
         max_wait = 30
@@ -170,241 +194,142 @@ def run_logs_insights_query(query: str, start_time: datetime, end_time: datetime
             status = result['status']
             
             if status == 'Complete':
-                print(f"Query {query_id} completed with {len(result['results'])} results")
+                logger.info("쿼리 완료", query_id=query_id, results_count=len(result['results']))
                 return result['results']
             elif status == 'Failed' or status == 'Cancelled':
-                raise Exception(f"Query failed with status: {status}")
+                raise Exception(f"쿼리 실패: {status}")
             
             time.sleep(1)
             elapsed += 1
         
-        raise Exception(f"Query timeout after {max_wait} seconds")
+        raise Exception(f"{max_wait}초 후 쿼리 타임아웃")
         
     except Exception as e:
-        print(f"Error running Logs Insights query: {str(e)}")
-        print(f"Query: {query}")
+        logger.error("Logs Insights 쿼리 실행 중 오류", error=str(e), query_preview=query[:100])
         return []
 
 
-def publish_style_metrics(style_stats: List[List[Dict[str, str]]]):
+def generate_report(start_time, end_time, style_stats, hourly_pattern, success_rate, processing_times, failure_reasons):
     """
-    스타일별 메트릭을 CloudWatch Custom Metrics로 발행
+    비즈니스 리포트 생성
     """
-    if not style_stats:
-        print("No style statistics to publish")
-        return
+    report_lines = []
+    report_lines.append(f"# 📊 ProfilePhotoAI 일일 리포트")
+    report_lines.append(f"**기간**: {start_time.strftime('%Y-%m-%d %H:%M')} ~ {end_time.strftime('%Y-%m-%d %H:%M')} (UTC)")
+    report_lines.append("")
     
-    metric_data = []
+    # 1. 스타일별 통계
+    report_lines.append("## 🎨 스타일별 이미지 생성 수")
+    if style_stats:
+        for row in style_stats:
+            style = count = None
+            for field in row:
+                if field['field'] == 'style':
+                    style = field['value']
+                elif field['field'] == 'count()':
+                    count = field['value']
+            if style:
+                report_lines.append(f"- **{style}**: {count}건")
+    else:
+        report_lines.append("- 데이터 없음")
+    report_lines.append("")
     
-    for row in style_stats:
-        style = None
-        count = 0
-        
+    # 2. 성공률
+    report_lines.append("## ✅ 성공률")
+    if success_rate and len(success_rate) > 0:
+        row = success_rate[0]
+        total = success = failed = 0
         for field in row:
-            if field['field'] == 'style':
-                style = field['value']
-            elif field['field'] == 'count()':
-                count = int(field['value'])
+            if field['field'] == 'total':
+                total = int(field['value'])
+            elif field['field'] == 'success':
+                success = int(field['value'])
+            elif field['field'] == 'failed':
+                failed = int(field['value'])
         
-        if style:
-            metric_data.append({
-                'MetricName': 'ImageGenerationByStyle',
-                'Dimensions': [
-                    {'Name': 'Style', 'Value': style}
-                ],
-                'Value': count,
-                'Unit': 'Count',
-                'Timestamp': datetime.utcnow()
-            })
+        success_rate_pct = (success / total * 100) if total > 0 else 0
+        report_lines.append(f"- **전체**: {total}건")
+        report_lines.append(f"- **성공**: {success}건 ({success_rate_pct:.1f}%)")
+        report_lines.append(f"- **실패**: {failed}건 ({100-success_rate_pct:.1f}%)")
+    else:
+        report_lines.append("- 데이터 없음")
+    report_lines.append("")
     
-    if metric_data:
-        cloudwatch_client.put_metric_data(
-            Namespace=NAMESPACE,
-            MetricData=metric_data
-        )
-        print(f"Published {len(metric_data)} style metrics to {NAMESPACE}")
+    # 3. 실패 원인
+    report_lines.append("## ❌ 실패 원인")
+    if failure_reasons:
+        for row in failure_reasons:
+            error_type = count = None
+            for field in row:
+                if field['field'] == 'errorType':
+                    error_type = field['value']
+                elif field['field'] == 'count':
+                    count = field['value']
+            if error_type:
+                report_lines.append(f"- **{error_type}**: {count}건")
+    else:
+        report_lines.append("- 실패 없음 ✨")
+    report_lines.append("")
+    
+    # 4. 처리 시간
+    report_lines.append("## ⏱️ 평균 처리 시간")
+    if processing_times and len(processing_times) > 0:
+        row = processing_times[0]
+        for field in row:
+            if field['field'] == 'avg_total':
+                avg_ms = float(field['value'])
+                report_lines.append(f"- **평균**: {avg_ms/1000:.1f}초")
+            elif field['field'] == 'p50':
+                p50_ms = float(field['value'])
+                report_lines.append(f"- **P50**: {p50_ms/1000:.1f}초")
+            elif field['field'] == 'p95':
+                p95_ms = float(field['value'])
+                report_lines.append(f"- **P95**: {p95_ms/1000:.1f}초")
+    else:
+        report_lines.append("- 데이터 없음")
+    report_lines.append("")
+    
+    # 5. 시간대별 패턴
+    report_lines.append("## 📈 시간대별 사용 패턴 (상위 5개)")
+    if hourly_pattern:
+        # 시간대별로 정렬 (카운트 높은 순)
+        sorted_hours = []
+        for row in hourly_pattern:
+            hour = count = None
+            for field in row:
+                if field['field'] == 'hour':
+                    hour = field['value']
+                elif field['field'] == 'count':
+                    count = int(field['value'])
+            if hour and count:
+                sorted_hours.append((hour, count))
+        
+        sorted_hours.sort(key=lambda x: x[1], reverse=True)
+        for i, (hour, count) in enumerate(sorted_hours[:5], 1):
+            report_lines.append(f"{i}. **{hour[:13]}**: {count}건")
+    else:
+        report_lines.append("- 데이터 없음")
+    
+    return "\n".join(report_lines)
 
 
-def publish_response_time_metrics(api_stats: List[List[Dict[str, str]]]):
+def send_discord_report(report_text):
     """
-    API 응답 시간 메트릭 발행
+    Discord Webhook으로 리포트 전송
     """
-    if not api_stats or len(api_stats) == 0:
-        print("No API response time statistics to publish")
+    if not DISCORD_WEBHOOK_URL:
+        logger.warning("Discord Webhook URL이 설정되지 않음")
         return
     
-    row = api_stats[0]
-    metrics = {}
+    payload = {
+        "content": report_text
+    }
     
-    for field in row:
-        field_name = field['field']
-        value = float(field['value'])
-        metrics[field_name] = value
-    
-    metric_data = [
-        {
-            'MetricName': 'GeminiAPIResponseTime',
-            'Dimensions': [{'Name': 'Statistic', 'Value': 'Average'}],
-            'Value': metrics.get('avg_time', 0),
-            'Unit': 'Milliseconds',
-            'Timestamp': datetime.utcnow()
-        },
-        {
-            'MetricName': 'GeminiAPIResponseTime',
-            'Dimensions': [{'Name': 'Statistic', 'Value': 'P50'}],
-            'Value': metrics.get('p50', 0),
-            'Unit': 'Milliseconds',
-            'Timestamp': datetime.utcnow()
-        },
-        {
-            'MetricName': 'GeminiAPIResponseTime',
-            'Dimensions': [{'Name': 'Statistic', 'Value': 'P95'}],
-            'Value': metrics.get('p95', 0),
-            'Unit': 'Milliseconds',
-            'Timestamp': datetime.utcnow()
-        },
-        {
-            'MetricName': 'GeminiAPIResponseTime',
-            'Dimensions': [{'Name': 'Statistic', 'Value': 'P99'}],
-            'Value': metrics.get('p99', 0),
-            'Unit': 'Milliseconds',
-            'Timestamp': datetime.utcnow()
-        },
-        {
-            'MetricName': 'GeminiAPIResponseTime',
-            'Dimensions': [{'Name': 'Statistic', 'Value': 'Max'}],
-            'Value': metrics.get('max_time', 0),
-            'Unit': 'Milliseconds',
-            'Timestamp': datetime.utcnow()
-        },
-        {
-            'MetricName': 'GeminiAPIResponseTime',
-            'Dimensions': [{'Name': 'Statistic', 'Value': 'Min'}],
-            'Value': metrics.get('min_time', 0),
-            'Unit': 'Milliseconds',
-            'Timestamp': datetime.utcnow()
-        }
-    ]
-    
-    cloudwatch_client.put_metric_data(
-        Namespace=NAMESPACE,
-        MetricData=metric_data
-    )
-    print(f"Published {len(metric_data)} API response time metrics to {NAMESPACE}")
-
-
-def publish_success_rate_metrics(success_stats: List[List[Dict[str, str]]]):
-    """
-    성공률 메트릭 발행
-    """
-    if not success_stats or len(success_stats) == 0:
-        print("No success rate statistics to publish")
-        return
-    
-    row = success_stats[0]
-    total = 0
-    success = 0
-    failed = 0
-    
-    for field in row:
-        if field['field'] == 'total':
-            total = int(field['value'])
-        elif field['field'] == 'success':
-            success = int(field['value'])
-        elif field['field'] == 'failed':
-            failed = int(field['value'])
-    
-    success_rate = (success / total * 100) if total > 0 else 0
-    
-    metric_data = [
-        {
-            'MetricName': 'JobSuccessRate',
-            'Value': success_rate,
-            'Unit': 'Percent',
-            'Timestamp': datetime.utcnow()
-        },
-        {
-            'MetricName': 'TotalJobs',
-            'Value': total,
-            'Unit': 'Count',
-            'Timestamp': datetime.utcnow()
-        },
-        {
-            'MetricName': 'SuccessfulJobs',
-            'Value': success,
-            'Unit': 'Count',
-            'Timestamp': datetime.utcnow()
-        },
-        {
-            'MetricName': 'FailedJobs',
-            'Value': failed,
-            'Unit': 'Count',
-            'Timestamp': datetime.utcnow()
-        }
-    ]
-    
-    cloudwatch_client.put_metric_data(
-        Namespace=NAMESPACE,
-        MetricData=metric_data
-    )
-    print(f"Published success rate metrics: {success_rate:.2f}% ({success}/{total}) to {NAMESPACE}")
-
-
-def publish_processing_time_metrics(processing_stats: List[List[Dict[str, str]]]):
-    """
-    처리 시간 메트릭 발행
-    """
-    if not processing_stats or len(processing_stats) == 0:
-        print("No processing time statistics to publish")
-        return
-    
-    row = processing_stats[0]
-    metrics = {}
-    
-    for field in row:
-        field_name = field['field']
-        value = float(field['value'])
-        metrics[field_name] = value
-    
-    metric_data = [
-        {
-            'MetricName': 'ProcessingTime',
-            'Dimensions': [{'Name': 'Stage', 'Value': 'Total'}],
-            'Value': metrics.get('avg_total', 0),
-            'Unit': 'Milliseconds',
-            'Timestamp': datetime.utcnow()
-        },
-        {
-            'MetricName': 'ProcessingTime',
-            'Dimensions': [{'Name': 'Stage', 'Value': 'Generation'}],
-            'Value': metrics.get('avg_generation', 0),
-            'Unit': 'Milliseconds',
-            'Timestamp': datetime.utcnow()
-        },
-        {
-            'MetricName': 'ProcessingTime',
-            'Dimensions': [{'Name': 'Stage', 'Value': 'Download'}],
-            'Value': metrics.get('avg_download', 0),
-            'Unit': 'Milliseconds',
-            'Timestamp': datetime.utcnow()
-        },
-        {
-            'MetricName': 'ProcessingTime',
-            'Dimensions': [{'Name': 'Stage', 'Value': 'Upload'}],
-            'Value': metrics.get('avg_upload', 0),
-            'Unit': 'Milliseconds',
-            'Timestamp': datetime.utcnow()
-        },
-        {
-            'MetricName': 'ProcessingTimeP95',
-            'Value': metrics.get('p95_total', 0),
-            'Unit': 'Milliseconds',
-            'Timestamp': datetime.utcnow()
-        }
-    ]
-    
-    cloudwatch_client.put_metric_data(
-        Namespace=NAMESPACE,
-        MetricData=metric_data
-    )
-    print(f"Published {len(metric_data)} processing time metrics to {NAMESPACE}")
+    try:
+        response = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
+        if response.status_code == 204:
+            logger.info("Discord Webhook 전송 성공")
+        else:
+            logger.warning("Discord Webhook 전송 실패", status_code=response.status_code, response=response.text[:200])
+    except Exception as e:
+        logger.error("Discord Webhook 전송 중 오류 발생", error=str(e))
