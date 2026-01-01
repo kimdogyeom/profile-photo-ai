@@ -15,6 +15,12 @@ import urllib3
 from datetime import datetime
 from urllib.parse import quote
 
+# AWS Lambda Powertools
+from aws_lambda_powertools import Logger
+
+# Powertools 초기화
+logger = Logger()
+
 http = urllib3.PoolManager()
 
 # 환경 변수
@@ -23,12 +29,13 @@ ENVIRONMENT = os.environ.get('ENVIRONMENT', 'dev')
 AWS_REGION = os.environ.get('AWS_REGION', 'ap-northeast-2')
 
 
+@logger.inject_lambda_context
 def lambda_handler(event, context):
     """
     CloudWatch Alarm → SNS → Lambda → Webhook
     SNS 메시지를 파싱하여 Discord로 전송
     """
-    print(f"Processing {len(event['Records'])} SNS messages")
+    logger.info("SNS 메시지 처리 시작", records_count=len(event['Records']))
     
     for record in event['Records']:
         try:
@@ -51,6 +58,11 @@ def lambda_handler(event, context):
             comparison = trigger.get('ComparisonOperator', '')
             evaluation_periods = trigger.get('EvaluationPeriods', 1)
             period = trigger.get('Period', 60)
+            
+            logger.info("알람 정보 파싱 완료",
+                alarm_name=alarm_name,
+                state_change=f"{old_state} → {new_state}",
+                metric=metric_name)
             
             # 알람 심각도 판단
             severity = determine_severity(alarm_name)
@@ -87,16 +99,18 @@ def lambda_handler(event, context):
                 headers={'Content-Type': 'application/json'}
             )
             
-            print(f"Webhook sent for {alarm_name}: HTTP {response.status}")
-            
-            if response.status != 204:
-                print(f"Warning: Unexpected response status {response.status}")
-                print(f"Response: {response.data.decode('utf-8')}")
+            if response.status == 204:
+                logger.info("Webhook 전송 성공", alarm_name=alarm_name)
+            else:
+                logger.warning("Webhook 전송 실패", 
+                    alarm_name=alarm_name,
+                    status_code=response.status,
+                    response_body=response.data.decode('utf-8')[:200])
         
         except Exception as e:
-            print(f"Error processing SNS message: {str(e)}")
-            import traceback
-            traceback.print_exc()
+            logger.exception("SNS 메시지 처리 중 오류 발생", 
+                error=str(e),
+                alarm_name=alarm_name if 'alarm_name' in locals() else 'Unknown')
     
     return {'statusCode': 200, 'body': json.dumps({'message': 'Processed successfully'})}
 
@@ -111,13 +125,16 @@ def determine_severity(alarm_name: str) -> str:
     alarm_upper = alarm_name.upper()
     
     if 'P0' in alarm_upper or 'CRITICAL' in alarm_upper:
-        return 'P0'
+        severity = 'P0'
     elif 'P1' in alarm_upper or 'WARNING' in alarm_upper:
-        return 'P1'
+        severity = 'P1'
     elif 'P2' in alarm_upper or 'INFO' in alarm_upper:
-        return 'P2'
+        severity = 'P2'
     else:
-        return 'P1'  # Default
+        severity = 'P1'  # Default
+    
+    logger.debug("알람 심각도 판단", alarm_name=alarm_name, severity=severity)
+    return severity
 
 
 def generate_logs_insights_link(alarm_name: str, namespace: str, metric_name: str) -> str:
@@ -151,6 +168,7 @@ def generate_logs_insights_link(alarm_name: str, namespace: str, metric_name: st
         query = 'fields @timestamp, level, event, error | filter level = "ERROR" | sort @timestamp desc | limit 20'
     
     if not log_group:
+        logger.debug("로그 그룹 매핑 없음", alarm_name=alarm_name)
         return None
     
     # CloudWatch Logs Insights URL 생성
@@ -166,6 +184,7 @@ def generate_logs_insights_link(alarm_name: str, namespace: str, metric_name: st
     
     url = f"{base_url}?region={AWS_REGION}#logsV2:logs-insights$3FqueryDetail$3D~(end~{end_time}~start~{start_time}~timeType~'ABSOLUTE~unit~'seconds~editorString~'{query_encoded}~source~(~'{log_group_encoded}))"
     
+    logger.debug("Logs Insights 링크 생성 완료", alarm_name=alarm_name, log_group=log_group)
     return url
 
 
@@ -174,7 +193,10 @@ def generate_alarm_link(alarm_name: str) -> str:
     CloudWatch Alarm 상세 페이지 링크 생성
     """
     alarm_name_encoded = quote(alarm_name)
-    return f"https://{AWS_REGION}.console.aws.amazon.com/cloudwatch/home?region={AWS_REGION}#alarmsV2:alarm/{alarm_name_encoded}"
+    link = f"https://{AWS_REGION}.console.aws.amazon.com/cloudwatch/home?region={AWS_REGION}#alarmsV2:alarm/{alarm_name_encoded}"
+    
+    logger.debug("알람 링크 생성 완료", alarm_name=alarm_name)
+    return link
 
 
 def format_discord_message(
