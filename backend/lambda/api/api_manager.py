@@ -388,7 +388,7 @@ def handle_get_user_info(event, context):
         if not user_id:
             return cors_response(401, {'error': 'Unauthorized: User ID not found'})
         
-        print(f"Getting user info for {user_id}")
+        logger.debug("사용자 정보 조회 요청", userId=user_id)
         
         # 사용자 정보 조회
         user = UserService.get_user(user_id)
@@ -396,7 +396,7 @@ def handle_get_user_info(event, context):
             # 신규 사용자 생성
             user_data = extract_user_data(event)
             user = UserService.create_or_update_user(user_data)
-            print(f"Created new user on info request: {user_id}")
+            logger.info("신규 사용자 생성", userId=user_id)
         
         # 오늘 사용량 조회
         can_generate, remaining = UsageService.can_generate_image(user_id)
@@ -438,7 +438,7 @@ def handle_get_user_jobs(event, context):
         limit = min(int(query_params.get('limit', 20)), 100)  # 최대 100
         status = query_params.get('status', 'all')
         
-        print(f"Getting jobs for user {user_id}, limit={limit}, status={status}")
+        logger.debug("작업 목록 조회 요청", userId=user_id, limit=limit, status=status)
         
         # DynamoDB 조회
         result = ImageJobService.get_user_jobs(
@@ -488,9 +488,9 @@ def handle_get_user_jobs(event, context):
                             ExpiresIn=86400  # 24시간
                         )
                         job['outputImageUrl'] = presigned_url
-                        print(f"Generated presigned URL for job {job.get('jobId')}: {output_key}")
+                        logger.debug("Presigned URL 생성 완료", jobId=job.get('jobId'), outputKey=output_key)
                     except Exception as e:
-                        print(f"Failed to generate presigned URL for job {job.get('jobId')}: {e}")
+                        logger.warning("Presigned URL 생성 실패", jobId=job.get('jobId'), error=str(e))
                         # 에러 발생 시 None으로 설정하여 프론트엔드에서 처리
                         job['outputImageUrl'] = None
         
@@ -526,7 +526,7 @@ def handle_download_image(event, context):
         if not job_id:
             return cors_response(400, {'error': 'jobId is required'})
         
-        print(f"Generating download URL for job {job_id}, user {user_id}")
+        logger.debug("다운로드 URL 생성 요청", jobId=job_id, userId=user_id)
         
         # DynamoDB에서 Job 조회
         job = ImageJobService.get_job(job_id)
@@ -567,7 +567,7 @@ def handle_download_image(event, context):
             ExpiresIn=3600  # 1시간
         )
         
-        print(f"Generated presigned URL for {output_key}")
+        logger.debug("다운로드 Presigned URL 생성 완료", jobId=job_id, outputKey=output_key)
         
         return cors_response(200, {
             'downloadUrl': presigned_url,
@@ -605,7 +605,7 @@ def extract_user_id(event):
         
         return user_id
     except Exception as e:
-        print(f"Error extracting user ID: {e}")
+        logger.error("사용자 ID 추출 실패", error=str(e))
         return None
 
 
@@ -631,7 +631,7 @@ def extract_user_data(event):
             'provider': extract_provider(claims)
         }
     except Exception as e:
-        print(f"Error extracting user data: {e}")
+        logger.error("사용자 데이터 추출 실패", error=str(e))
         return None
 
 
@@ -656,7 +656,7 @@ def parse_request_body(event):
             return json.loads(body)
         return body
     except json.JSONDecodeError as e:
-        print(f"Error parsing request body: {e}")
+        logger.error("요청 본문 파싱 실패", error=str(e))
         return None
 
 
@@ -681,14 +681,18 @@ def validate_generation_request(file_key, prompt):
 def verify_s3_file_exists(bucket, key):
     """S3 파일 존재 여부 확인"""
     try:
-        print(f"HEAD object request: Bucket={bucket}, Key={key}")
+        logger.debug("S3 파일 존재 확인", bucket=bucket, key=key)
         response = s3_client.head_object(Bucket=bucket, Key=key)
-        print(f"File exists: s3://{bucket}/{key}, Size={response.get('ContentLength')}")
+        logger.debug("S3 파일 존재 확인됨", 
+            s3_uri=f"s3://{bucket}/{key}", 
+            size=response.get('ContentLength'))
         return True
     except Exception as e:
         error_code = e.response['Error']['Code'] if hasattr(e, 'response') else 'Unknown'
-        print(f"Error checking S3 file (Code: {error_code}): {e}")
-        print(f"Attempted: s3://{bucket}/{key}")
+        logger.warning("S3 파일 확인 실패", 
+            error_code=error_code,
+            s3_uri=f"s3://{bucket}/{key}",
+            error=str(e))
         if error_code == '404':
             return False
         else:

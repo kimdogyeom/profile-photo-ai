@@ -42,21 +42,21 @@ def get_gemini_api_key():
     # 1. 환경 변수에서 직접 확인 (로컬 테스트용)
     api_key = os.environ.get("GEMINI_API_KEY")
     if api_key:
-        print("Using GEMINI_API_KEY from environment variable")
+        logger.info("환경 변수에서 Gemini API 키 사용 중")
         return api_key
 
     # 2. Secrets Manager ARN에서 가져오기 (프로덕션)
     secret_arn = os.environ.get("GEMINI_API_KEY_SECRET_ARN")
     if secret_arn:
         try:
-            print(f"Retrieving Gemini API key from Secrets Manager: {secret_arn}")
+            logger.info("Secrets Manager에서 Gemini API 키 조회 중", secret_arn=secret_arn)
             response = secretsmanager_client.get_secret_value(SecretId=secret_arn)
             secret_string = response['SecretString']
 
             # JSON이 아니면 plain text로 처리
             return secret_string.strip()
         except Exception as e:
-            print(f"Error retrieving Gemini API key from Secrets Manager: {e}")
+            logger.error("Secrets Manager에서 Gemini API 키 조회 실패", error=str(e), secret_arn=secret_arn)
     
     raise ValueError("GEMINI_API_KEY not found in Secrets Manager or environment variables")
 
@@ -67,8 +67,8 @@ GEMINI_API_KEY = get_gemini_api_key()
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 # 환경 변수
-RESULT_BUCKET = os.environ.get('RESULT_BUCKET', 'profile-photo-ai-results-final')
-MODEL_NAME = os.environ.get('MODEL_NAME', 'gemini-2.5-flash-image')
+RESULT_BUCKET = os.environ.get('RESULT_BUCKET')
+MODEL_NAME = os.environ.get('MODEL_NAME')
 WEBSOCKET_ENDPOINT = os.environ.get("WEBSOCKET_ENDPOINT")
 
 # WebSocket 클라이언트 초기화 (사용 가능한 경우)
@@ -78,7 +78,7 @@ if WEBSOCKET_ENDPOINT:
 
 @logger.inject_lambda_context
 @tracer.capture_lambda_handler
-@metrics.log_metrics
+@metrics.log_metrics(capture_cold_start_metric=True)
 def lambda_handler(event, context):
     """
     SQS 메시지를 처리하여 Gemini API로 이미지를 생성하고 결과를 S3에 저장합니다.
@@ -86,6 +86,10 @@ def lambda_handler(event, context):
     """
     processed_count = 0
     failed_count = 0
+    
+    # 배치 크기 메트릭
+    batch_size = len(event['Records'])
+    metrics.add_metric(name="BatchSize", unit=MetricUnit.Count, value=batch_size)
     
     for record in event['Records']:
         job_id = None
@@ -102,7 +106,7 @@ def lambda_handler(event, context):
             style = message_body.get('style', 'professional')
             connection_id = message_body.get('connectionId')  # WebSocket (선택적)
 
-            log.info('job_processing_started',
+            logger.info('job_processing_started',
                 jobId=job_id,
                 userId=user_id,
                 style=style,
@@ -126,14 +130,14 @@ def lambda_handler(event, context):
             input_image = Image.open(BytesIO(input_image_bytes))
             download_time = (time.time() - download_start) * 1000
 
-            log.info('image_downloaded',
+            logger.info('image_downloaded',
                 jobId=job_id,
                 fileSize=len(input_image_bytes),
                 downloadTime=download_time,
                 imageSize=f"{input_image.width}x{input_image.height}")
 
-            # 2. Gemini 2.5 Flash Image API로 이미지 생성 요청 (google-genai)
-            log.info('gemini_api_request',
+            # 2. Gemini API로 이미지 생성 요청 (google-genai)
+            logger.info('gemini_api_request',
                 jobId=job_id,
                 promptLength=len(prompt),
                 modelName=MODEL_NAME)
@@ -161,9 +165,12 @@ def lambda_handler(event, context):
             
             generation_time = (time.time() - generation_start) * 1000
             
+            # Gemini API 응답 시간 메트릭
+            metrics.add_metric(name="GeminiAPIResponseTime", unit=MetricUnit.Milliseconds, value=generation_time)
+            
             # 느린 응답 경고
             if generation_time > 30000:  # 30초 초과
-                log.warning('gemini_api_slow_response',
+                logger.warning('gemini_api_slow_response',
                     jobId=job_id,
                     responseTime=generation_time,
                     threshold=30000)
@@ -178,7 +185,7 @@ def lambda_handler(event, context):
             if hasattr(candidate, 'finish_reason'):
                 finish_reason = str(candidate.finish_reason)
                 if 'STOP' not in finish_reason.upper() and finish_reason != '1':
-                    log.warning('unexpected_finish_reason',
+                    logger.warning('unexpected_finish_reason',
                         jobId=job_id,
                         finishReason=finish_reason)
             
@@ -192,7 +199,7 @@ def lambda_handler(event, context):
                     if hasattr(part, 'inline_data') and part.inline_data:
                         generated_image_bytes = part.inline_data.data
                         mime_type = getattr(part.inline_data, 'mime_type', 'unknown')
-                        log.info('gemini_api_success',
+                        logger.info('gemini_api_success',
                             jobId=job_id,
                             responseTime=generation_time,
                             mimeType=mime_type,
@@ -200,19 +207,19 @@ def lambda_handler(event, context):
                         break
                     # text 응답인 경우 (설명만 생성된 경우)
                     elif hasattr(part, 'text') and part.text:
-                        log.warning('gemini_text_response',
+                        logger.warning('gemini_text_response',
                             jobId=job_id,
                             textPreview=part.text[:200])
 
             if not generated_image_bytes:
                 error_msg = "Image generation failed: no image data in response"
-                log.error('gemini_api_error',
+                logger.error('gemini_api_error',
                     jobId=job_id,
                     error=error_msg,
                     responseStructure=str(candidate)[:500])
                 raise Exception(error_msg)
 
-            log.info('image_generated',
+            logger.info('image_generated',
                 jobId=job_id,
                 generationTime=generation_time,
                 outputSize=len(generated_image_bytes))
@@ -238,7 +245,7 @@ def lambda_handler(event, context):
             upload_time = (time.time() - upload_start) * 1000
             output_s3_uri = f"s3://{RESULT_BUCKET}/{output_key}"
             
-            log.info('s3_upload_success',
+            logger.info('s3_upload_success',
                 jobId=job_id,
                 s3Uri=output_s3_uri,
                 uploadTime=upload_time,
@@ -265,7 +272,7 @@ def lambda_handler(event, context):
             # 메모리 사용량 추적
             memory_used = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024  # MB
             
-            log.info('job_completed',
+            logger.info('job_completed',
                 jobId=job_id,
                 userId=user_id,
                 processingTime=processing_time,
@@ -274,6 +281,11 @@ def lambda_handler(event, context):
                 uploadTime=upload_time,
                 memoryUsed=memory_used,
                 outputSize=len(generated_image_bytes))
+            
+            # 성공 메트릭 추가
+            metrics.add_metric(name="ImageGenerationSuccess", unit=MetricUnit.Count, value=1)
+            metrics.add_metric(name="TotalProcessingTime", unit=MetricUnit.Milliseconds, value=processing_time)
+            metrics.add_metric(name="MemoryUsed", unit=MetricUnit.Megabytes, value=memory_used)
 
             # 7. WebSocket으로 결과 전송 (연결이 있는 경우)
             if connection_id and api_gateway_client:
@@ -289,12 +301,12 @@ def lambda_handler(event, context):
                         ConnectionId=connection_id,
                         Data=json.dumps(notification_data).encode('utf-8')
                     )
-                    log.info('websocket_notification_sent',
+                    logger.info('websocket_notification_sent',
                         jobId=job_id,
                         connectionId=connection_id,
                         notificationType='image_completed')
                 except Exception as ws_error:
-                    log.warning('websocket_notification_failed',
+                    logger.warning('websocket_notification_failed',
                         jobId=job_id,
                         connectionId=connection_id,
                         error=str(ws_error))
@@ -314,7 +326,10 @@ def lambda_handler(event, context):
             except:
                 memory_used = None
             
-            log.error('job_failed',
+            # 실패 메트릭 추가
+            metrics.add_metric(name="ImageGenerationFailure", unit=MetricUnit.Count, value=1)
+            
+            logger.error('job_failed',
                 jobId=job_id,
                 userId=user_id,
                 error=error_message,
@@ -334,7 +349,7 @@ def lambda_handler(event, context):
                         processing_time=processing_time
                     )
                 except Exception as db_error:
-                    log.error('dynamodb_update_failed',
+                    logger.error('dynamodb_update_failed',
                         jobId=job_id,
                         error=str(db_error),
                         errorType=type(db_error).__name__)
@@ -352,19 +367,23 @@ def lambda_handler(event, context):
                         ConnectionId=connection_id,
                         Data=json.dumps(error_notification).encode('utf-8')
                     )
-                    log.info('websocket_error_notification_sent',
+                    logger.info('websocket_error_notification_sent',
                         jobId=job_id,
                         connectionId=connection_id)
                 except Exception as api_error:
-                    log.warning('websocket_error_notification_failed',
+                    logger.warning('websocket_error_notification_failed',
                         jobId=job_id,
                         error=str(api_error))
 
     # 최종 배치 처리 결과
-    log.info('batch_processing_complete',
+    logger.info('batch_processing_complete',
         totalRecords=len(event['Records']),
         processedCount=processed_count,
         failedCount=failed_count)
+    
+    # 배치 처리 결과 메트릭
+    metrics.add_metric(name="BatchProcessed", unit=MetricUnit.Count, value=processed_count)
+    metrics.add_metric(name="BatchFailed", unit=MetricUnit.Count, value=failed_count)
     
     return {
         'statusCode': 200,

@@ -6,13 +6,12 @@ from datetime import datetime
 
 import boto3
 # AWS Lambda Powertools
-from aws_lambda_powertools import Logger, Tracer, Metrics
+from aws_lambda_powertools import Logger, Tracer
 from aws_lambda_powertools.logging import correlation_paths
 
 # Powertools 초기화
 logger = Logger()
 tracer = Tracer()
-metrics = Metrics()
 
 # AWS 클라이언트 초기화 (LocalStack 지원)
 endpoint_url = os.environ.get('AWS_ENDPOINT_URL')
@@ -41,7 +40,6 @@ MAX_FILE_SIZE = 10 * 1024 * 1024
 
 @logger.inject_lambda_context(correlation_id_path=correlation_paths.API_GATEWAY_HTTP)
 @tracer.capture_lambda_handler
-@metrics.log_metrics
 def lambda_handler(event, context):
     """
     클라이언트의 파일 업로드 요청을 받아 S3 Presigned URL을 생성하여 반환합니다.

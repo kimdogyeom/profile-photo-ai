@@ -8,6 +8,7 @@ Globals:
     Runtime: python3.12
     Timeout: 30
     MemorySize: 512
+    Tracing: Active  # AWS X-Ray 활성화
     Environment:
       Variables:
         UPLOAD_BUCKET: !Ref UploadBucket
@@ -16,6 +17,9 @@ Globals:
         USAGE_LOG_TABLE: !Ref UsageLogTable
         IMAGE_JOBS_TABLE: !Ref ImageJobsTable
         DAILY_LIMIT: 15
+        POWERTOOLS_SERVICE_NAME: ProfilePhotoAI  # X-Ray 서비스 이름
+        POWERTOOLS_METRICS_NAMESPACE: ProfilePhotoAI/Metrics  # Metrics 네임스페이스
+        POWERTOOLS_LOG_LEVEL: INFO  # 로그 레벨
     Layers:
       - !Ref DynamoDBHelperLayer
 
@@ -701,6 +705,7 @@ Resources:
       Description: Send CloudWatch Alarm notifications to Discord
       Timeout: 10
       MemorySize: 128
+      Tracing: PassThrough  # X-Ray 트레이싱 비활성화
       Environment:
         Variables:
           WEBHOOK_URL: !Ref DiscordWebhookUrl
@@ -731,12 +736,14 @@ Resources:
       FunctionName: !Sub profile-photo-ai-StatsAggregator-${Environment}
       CodeUri: backend/lambda/monitoring/stats_aggregator/
       Handler: stats_aggregator.lambda_handler
-      Description: Aggregate hourly statistics and publish custom metrics
+      Description: Generate daily business reports from CloudWatch Logs
       Timeout: 60 # CloudWatch Logs 쿼리 대기 시간
       MemorySize: 256
+      Tracing: PassThrough  # X-Ray 트레이싱 비활성화
       Environment:
         Variables:
           ENVIRONMENT: !Ref Environment
+          DISCORD_WEBHOOK_URL: !Ref DiscordWebhookUrl
       Policies:
         # CloudWatch Logs - Read for Insights queries
         - Statement:
@@ -748,16 +755,6 @@ Resources:
                 - logs:DescribeLogGroups
               Resource:
                 - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/profile-photo-ai-*
-        # CloudWatch - Publish custom metrics
-        - Statement:
-            - Sid: CloudWatchPutMetricAccess
-              Effect: Allow
-              Action:
-                - cloudwatch:PutMetricData
-              Resource: '*'
-              Condition:
-                StringEquals:
-                  cloudwatch:namespace: !Sub ProfilePhotoAI/${Environment}/Statistics
         # CloudWatch Logs - Write logs
         - Statement:
             - Sid: CloudWatchLogsWriteAccess
@@ -768,11 +765,11 @@ Resources:
                 - logs:PutLogEvents
               Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/profile-photo-ai-StatsAggregator-${Environment}:*
       Events:
-        HourlySchedule:
+        DailySchedule:
           Type: Schedule
           Properties:
-            Schedule: cron(0 * * * ? *) # 매 1시간마다 실행 (매시 0분)
-            Description: Aggregate hourly statistics and publish custom metrics
+            Schedule: cron(0 9 * * ? *) # 매일 오전 9시(UTC) = 오후 6시(KST) 실행
+            Description: Generate daily business report and send to Discord
             Enabled: true
 
   StatsAggregatorLogGroup:
@@ -1232,6 +1229,111 @@ Resources:
       Period: 300 # 5분
       EvaluationPeriods: 1
       Threshold: 5
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+
+  # ========================================
+  # CloudWatch Alarms - Custom Metrics (EMF)
+  # ========================================
+
+  # 이미지 생성 실패율 알람 (5분간 실패율 20% 초과)
+  ImageGenerationFailureRateAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub profile-photo-ai-P1-ImageGenerationFailureRate-${Environment}
+      AlarmDescription: 'WARNING: Image generation failure rate exceeds 20%'
+      Metrics:
+        - Id: m1
+          MetricStat:
+            Metric:
+              Namespace: aws-embedded-metrics
+              MetricName: ImageGenerationFailure
+              Dimensions:
+                - Name: service
+                  Value: !Sub profile-photo-ai-ImageProcess-${Environment}
+            Period: 300
+            Stat: Sum
+        - Id: m2
+          MetricStat:
+            Metric:
+              Namespace: aws-embedded-metrics
+              MetricName: ImageGenerationSuccess
+              Dimensions:
+                - Name: service
+                  Value: !Sub profile-photo-ai-ImageProcess-${Environment}
+            Period: 300
+            Stat: Sum
+        - Id: e1
+          Expression: "(m1 / (m1 + m2)) * 100"
+          Label: FailureRate
+      EvaluationPeriods: 1
+      Threshold: 20
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+
+  # Gemini API 평균 응답 시간 알람 (5분 평균 45초 초과)
+  GeminiAPISlowResponseAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub profile-photo-ai-P1-GeminiAPISlowResponse-${Environment}
+      AlarmDescription: 'WARNING: Gemini API average response time exceeds 45 seconds'
+      MetricName: GeminiAPIResponseTime
+      Namespace: aws-embedded-metrics
+      Dimensions:
+        - Name: service
+          Value: !Sub profile-photo-ai-ImageProcess-${Environment}
+      Statistic: Average
+      Period: 300 # 5분
+      EvaluationPeriods: 1
+      Threshold: 45000 # 45초 (밀리초)
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+
+  # 전체 처리 시간 알람 (5분 평균 60초 초과)
+  TotalProcessingTimeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub profile-photo-ai-P1-TotalProcessingTime-${Environment}
+      AlarmDescription: 'WARNING: Total processing time exceeds 60 seconds on average'
+      MetricName: TotalProcessingTime
+      Namespace: aws-embedded-metrics
+      Dimensions:
+        - Name: service
+          Value: !Sub profile-photo-ai-ImageProcess-${Environment}
+      Statistic: Average
+      Period: 300 # 5분
+      EvaluationPeriods: 1
+      Threshold: 60000 # 60초 (밀리초)
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+
+  # 이미지 생성 실패 카운트 알람 (5분간 10건 이상 실패)
+  ImageGenerationFailureCountAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub profile-photo-ai-P1-ImageGenerationFailureCount-${Environment}
+      AlarmDescription: 'WARNING: More than 10 image generation failures in 5 minutes'
+      MetricName: ImageGenerationFailure
+      Namespace: aws-embedded-metrics
+      Dimensions:
+        - Name: service
+          Value: !Sub profile-photo-ai-ImageProcess-${Environment}
+      Statistic: Sum
+      Period: 300 # 5분
+      EvaluationPeriods: 1
+      Threshold: 10
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
       ActionsEnabled: true
