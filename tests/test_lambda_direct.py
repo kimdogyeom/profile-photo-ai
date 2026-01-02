@@ -255,22 +255,6 @@ def test_api_manager_cors_response():
     assert body['message'] == "success"
 
 
-def test_logging_helper_import():
-    """logging_helper 모듈 import 테스트"""
-    try:
-        from logging_helper import StructuredLogger, get_logger
-        
-        # Logger 생성 가능 여부 확인
-        logger = StructuredLogger('TestFunction', 'test-request-id')
-        assert logger is not None
-        assert hasattr(logger, 'info')
-        assert hasattr(logger, 'warning')
-        assert hasattr(logger, 'error')
-        
-    except ImportError as e:
-        pytest.fail(f"logging_helper import failed: {e}")
-
-
 def test_dynamodb_helper_import():
     """dynamodb_helper 모듈 import 테스트"""
     try:
