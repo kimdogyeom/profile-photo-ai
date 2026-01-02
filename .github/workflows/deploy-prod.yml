@@ -253,7 +253,7 @@ jobs:
       - name: Create prod .env
         run: |
           cd frontend
-          cat > .env.production << EOF
+          cat > .env.prod << EOF
           REACT_APP_API_BASE_URL=${{ steps.backend-config.outputs.api_url }}
           REACT_APP_AWS_REGION=${{ env.AWS_REGION }}
           REACT_APP_USER_POOL_ID=${{ steps.backend-config.outputs.user_pool_id }}
@@ -264,7 +264,7 @@ jobs:
       - name: Install dependencies
         run: |
           cd frontend
-          npm ci --production=false
+          npm ci
       
       - name: Build prod frontend
         run: |
