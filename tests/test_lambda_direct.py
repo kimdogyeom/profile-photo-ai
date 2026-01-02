@@ -71,7 +71,18 @@ def mock_aws_services():
             }
 
 
-def test_file_transfer_presigned_url_generation(mock_aws_services):
+@pytest.fixture
+def mock_lambda_context():
+    """Lambda Context 객체 모킹"""
+    context = Mock()
+    context.function_name = 'test-function'
+    context.memory_limit_in_mb = 512
+    context.invoked_function_arn = 'arn:aws:lambda:ap-northeast-2:123456789012:function:test-function'
+    context.aws_request_id = 'test-request-id-123'
+    return context
+
+
+def test_file_transfer_presigned_url_generation(mock_aws_services, mock_lambda_context):
     """FileTransfer Lambda - Presigned URL 생성 테스트"""
     from file_transfer import lambda_handler
     
@@ -103,7 +114,7 @@ def test_file_transfer_presigned_url_generation(mock_aws_services):
     }
     
     # Lambda 호출
-    response = lambda_handler(event, None)
+    response = lambda_handler(event, mock_lambda_context)
     
     # 응답 검증
     assert response['statusCode'] == 200
@@ -119,7 +130,7 @@ def test_file_transfer_presigned_url_generation(mock_aws_services):
     mock_aws_services['s3'].generate_presigned_url.assert_called_once()
 
 
-def test_file_transfer_invalid_file_type(mock_aws_services):
+def test_file_transfer_invalid_file_type(mock_aws_services, mock_lambda_context):
     """FileTransfer Lambda - 잘못된 파일 타입 거부 테스트"""
     from file_transfer import lambda_handler
     
@@ -142,7 +153,7 @@ def test_file_transfer_invalid_file_type(mock_aws_services):
         }
     }
     
-    response = lambda_handler(event, None)
+    response = lambda_handler(event, mock_lambda_context)
     
     # 400 에러 반환 확인
     assert response['statusCode'] == 400
@@ -150,7 +161,7 @@ def test_file_transfer_invalid_file_type(mock_aws_services):
     assert 'error' in body
 
 
-def test_file_transfer_file_too_large(mock_aws_services):
+def test_file_transfer_file_too_large(mock_aws_services, mock_lambda_context):
     """FileTransfer Lambda - 파일 크기 초과 거부 테스트"""
     from file_transfer import lambda_handler
     
@@ -173,7 +184,7 @@ def test_file_transfer_file_too_large(mock_aws_services):
         }
     }
     
-    response = lambda_handler(event, None)
+    response = lambda_handler(event, mock_lambda_context)
     
     # 400 에러 반환 확인
     assert response['statusCode'] == 400
