@@ -4,3 +4,6 @@ Pillow==10.1.0
 
 # AWS Lambda Powertools - 로깅, 메트릭, 트레이싱
 aws-lambda-powertools
+
+# X-Ray SDK - Powertools Tracer 의존성 (테스트 환경 필요)
+aws-xray-sdk>=2.12.0
