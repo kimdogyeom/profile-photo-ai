@@ -7,13 +7,26 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TF_DIR="$ROOT_DIR/terraform/envs/$ENVIRONMENT"
 FRONTEND_DIR="$ROOT_DIR/frontend"
 
-API_BASE_URL="$(terraform -chdir="$TF_DIR" output -raw api_base_url)"
-AWS_REGION="$(terraform -chdir="$TF_DIR" output -raw aws_region)"
-USER_POOL_ID="$(terraform -chdir="$TF_DIR" output -raw cognito_user_pool_id)"
-CLIENT_ID="$(terraform -chdir="$TF_DIR" output -raw cognito_user_pool_client_id)"
+./scripts/tf.sh init "$ENVIRONMENT" >/dev/null
 
-FRONTEND_BUCKET="$(terraform -chdir="$TF_DIR" output -raw frontend_bucket_name)"
-DIST_ID="$(terraform -chdir="$TF_DIR" output -raw frontend_distribution_id)"
+get_output() {
+  local key="$1"
+  local value
+
+  value="$(./scripts/tf.sh output "$ENVIRONMENT" -raw "$key")"
+  if [[ -z "$value" || "$value" == "null" ]]; then
+    echo "Required Terraform output not available: $key"
+    exit 1
+  fi
+  echo "$value"
+}
+
+API_BASE_URL="$(get_output api_base_url)"
+AWS_REGION="$(get_output aws_region)"
+USER_POOL_ID="$(get_output cognito_user_pool_id)"
+CLIENT_ID="$(get_output cognito_user_pool_client_id)"
+FRONTEND_BUCKET="$(get_output frontend_bucket_name)"
+DIST_ID="$(get_output frontend_distribution_id)"
 
 cd "$FRONTEND_DIR"
 npm ci

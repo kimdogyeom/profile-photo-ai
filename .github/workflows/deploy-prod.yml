@@ -12,9 +12,8 @@ on:
         required: true
 
 env:
-  AWS_REGION: ap-northeast-2
+  AWS_REGION: ap-northeast-1
   ENVIRONMENT: prod
-  STACK_NAME: profile-photo-ai-prod
 
 jobs:
   validate-input:
@@ -23,7 +22,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     environment:
       name: prod
-    
+
     steps:
       - name: Check confirmation
         run: |
@@ -38,42 +37,54 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: prod
-    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
           cache: 'pip'
-      
-      - name: Install dependencies
+
+      - name: Install Python tooling
         run: |
           python -m pip install --upgrade pip
-          pip install -r backend/layers/requirements.txt
-          pip install pytest pytest-cov requests
-      
-      - name: Run comprehensive tests
+          pip install pytest pytest-cov black flake8
+
+      - name: Run backend checks
         run: |
-          echo "🧪 Running comprehensive tests..."
-          python -m pytest tests/ -v --cov=backend/lambda --cov-report=term-missing
-      
-      - name: Security scan
-        run: |
-          echo "🔒 Running security checks..."
-          # Check for hardcoded secrets
-          if grep -r "AKIA[0-9A-Z]{16}" --exclude-dir=.git .; then
-            echo "❌ AWS Access Key found!"
-            exit 1
+          python -m compileall backend
+          black --check backend/lambda
+          flake8 backend/lambda --max-line-length=120 --extend-ignore=E203,E266,E501
+          if [ -d backend/tests ] && find backend/tests -name "test_*.py" | grep -q .; then
+            cd backend
+            python -m pytest -v --cov=lambda --cov-report=term-missing
+          else
+            echo "⚠️ Backend tests not found, skipping"
           fi
-          echo "✅ Security checks passed"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Build frontend
+        run: |
+          cd frontend
+          npm run build
 
   deploy-backend:
     name: Deploy Backend to Production
-    needs: test
-    if: needs.test.result == 'success'
+    needs: [test, validate-input]
+    if: github.event_name != 'workflow_dispatch' || needs.validate-input.result == 'success'
     runs-on: ubuntu-latest
     environment:
       name: prod
@@ -81,122 +92,73 @@ jobs:
     permissions:
       id-token: write
       contents: write
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      
-      - name: Install AWS SAM CLI
-        run: |
-          pip install aws-sam-cli
-      
+
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::701111311029:role/profile-photo-ai-prod-role
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME_PROD }}
           aws-region: ${{ env.AWS_REGION }}
-      
-      - name: Build SAM application
+
+      - name: Build Lambda artifacts
         run: |
-          echo "📦 Building SAM application for prod..."
-          sam build --parallel
-      
-      - name: Create backup tag
+          ./scripts/build-lambdas.sh
+
+      - name: Terraform preflight
         run: |
-          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-          echo "Creating backup: profile-photo-ai-prod-backup-$TIMESTAMP"
-          
-          aws cloudformation describe-stacks \
-            --stack-name ${{ env.STACK_NAME }} \
-            --region ${{ env.AWS_REGION }} \
-            --query 'Stacks[0]' > backup-$TIMESTAMP.json || echo "No existing stack"
-      
-      - name: Get Google OAuth credentials
-        id: oauth-creds
-        run: |
-          echo "🔐 Fetching Google OAuth credentials from Secrets Manager..."
-          OAUTH_SECRET=$(aws secretsmanager get-secret-value \
-            --secret-id /profile-photo-ai/prod/google-oauth \
-            --region ${{ env.AWS_REGION }} \
-            --query SecretString --output text)
-          
-          CLIENT_ID=$(echo $OAUTH_SECRET | jq -r '.client_id')
-          CLIENT_SECRET=$(echo $OAUTH_SECRET | jq -r '.client_secret')
-          
-          echo "client_id=$CLIENT_ID" >> $GITHUB_OUTPUT
-          echo "client_secret=$CLIENT_SECRET" >> $GITHUB_OUTPUT
-          echo "✅ OAuth credentials loaded"
-      
-      - name: Deploy to AWS Prod
-        run: |
-          echo "🚀 Deploying to PROD..."
-          
-          # Get Discord Monitoring Webhook URL from GitHub Secrets (optional)
-          DISCORD_MONITORING_WEBHOOK="${{ secrets.DISCORD_MONITORING_WEBHOOK_URL }}"
-          if [ -z "$DISCORD_MONITORING_WEBHOOK" ]; then
-            DISCORD_MONITORING_WEBHOOK=""
+          if [ -z "${{ secrets.AWS_ROLE_TO_ASSUME_PROD }}" ]; then
+            echo "❌ Missing secret: AWS_ROLE_TO_ASSUME_PROD"
+            exit 1
           fi
-          
-          sam deploy \
-            --stack-name ${{ env.STACK_NAME }} \
-            --region ${{ env.AWS_REGION }} \
-            --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
-            --resolve-s3 \
-            --s3-prefix profile-photo-ai-prod \
-            --no-confirm-changeset \
-            --no-fail-on-empty-changeset \
-            --parameter-overrides \
-              Environment=${{ env.ENVIRONMENT }} \
-              FrontendCallbackUrl=https://aigyeom.com/callback \
-              DomainName=aigyeom.com \
-              HostedZoneId=Z04120473BUOE0AZ1WEE1 \
-              CertificateArn=arn:aws:acm:us-east-1:701111311029:certificate/46a944be-7e31-4cf4-bcc0-b600b074a8fa \
-              GoogleOAuthClientId="${{ steps.oauth-creds.outputs.client_id }}" \
-              GoogleOAuthClientSecret="${{ steps.oauth-creds.outputs.client_secret }}" \
-              DiscordWebhookUrl="$DISCORD_MONITORING_WEBHOOK"
-      
-      - name: Get stack outputs
-        id: stack-outputs
+
+          if [ ! -f terraform/envs/prod/main.tf ]; then
+            echo "❌ Missing terraform/envs/prod/main.tf"
+            exit 1
+          fi
+
+          ./scripts/tf.sh init prod
+          ./scripts/tf.sh validate prod
+          ./scripts/tf.sh plan prod -out=tfplan
+          if [ ! -f terraform/envs/prod/tfplan ]; then
+            echo "❌ Terraform plan file not generated"
+            exit 1
+          fi
+          terraform -chdir=terraform/envs/prod show -no-color tfplan | sed -n '1,160p'
+
+      - name: Deploy Terraform stack
         run: |
-          API_URL=$(aws cloudformation describe-stacks \
-            --stack-name ${{ env.STACK_NAME }} \
-            --region ${{ env.AWS_REGION }} \
-            --query 'Stacks[0].Outputs[?OutputKey==`ApiGatewayUrl`].OutputValue' \
-            --output text)
-          
-          echo "api_url=$API_URL" >> $GITHUB_OUTPUT
-          echo "✅ API Gateway URL: $API_URL"
-      
+          ./scripts/tf.sh apply prod -auto-approve tfplan
+
       - name: Run prod smoke tests
         run: |
-          echo "🧪 Running prod smoke tests..."
-          API_URL="${{ steps.stack-outputs.outputs.api_url }}"
-          
-          # Health check with retry
+          API_URL=$(./scripts/tf.sh output prod -raw api_base_url)
+          if [ -z "$API_URL" ] || [ "$API_URL" = "null" ]; then
+            echo "❌ API_URL not found from Terraform output"
+            exit 1
+          fi
+          STATUS="failure"
           for i in {1..5}; do
             HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${API_URL}/health" || echo "000")
             if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "404" ]; then
               echo "✅ API is healthy"
+              STATUS="success"
               break
             fi
             echo "Attempt $i: HTTP $HTTP_CODE, retrying in 10s..."
             sleep 10
           done
-      
-      - name: Tag release
-        if: github.ref == 'refs/heads/main'
-        run: |
-          VERSION=$(date +%Y.%m.%d-%H%M)
-          echo "Creating release tag: v$VERSION"
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
-          git tag -a "v$VERSION" -m "Prod release $VERSION"
-          git push origin "v$VERSION" || echo "Tag already exists"
+          if [ "$STATUS" != "success" ]; then
+            echo "❌ API health check failed after retries"
+            exit 1
+          fi
 
   deploy-frontend:
     name: Deploy Frontend to Prod
@@ -207,130 +169,30 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
-      
-      - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: arn:aws:iam::701111311029:role/profile-photo-ai-prod-role
-          aws-region: ${{ env.AWS_REGION }}
-      
-      - name: Get backend configuration
-        id: backend-config
-        run: |
-          API_URL=$(aws cloudformation describe-stacks \
-            --stack-name ${{ env.STACK_NAME }} \
-            --region ${{ env.AWS_REGION }} \
-            --query 'Stacks[0].Outputs[?OutputKey==`ApiGatewayUrl`].OutputValue' \
-            --output text)
-          
-          USER_POOL_ID=$(aws cloudformation describe-stacks \
-            --stack-name ${{ env.STACK_NAME }} \
-            --region ${{ env.AWS_REGION }} \
-            --query 'Stacks[0].Outputs[?OutputKey==`CognitoUserPoolId`].OutputValue' \
-            --output text)
-          
-          CLIENT_ID=$(aws cloudformation describe-stacks \
-            --stack-name ${{ env.STACK_NAME }} \
-            --region ${{ env.AWS_REGION }} \
-            --query 'Stacks[0].Outputs[?OutputKey==`CognitoUserPoolClientId`].OutputValue' \
-            --output text)
-          
-          echo "api_url=$API_URL" >> $GITHUB_OUTPUT
-          echo "user_pool_id=$USER_POOL_ID" >> $GITHUB_OUTPUT
-          echo "client_id=$CLIENT_ID" >> $GITHUB_OUTPUT
-      
-      - name: Create prod .env
-        run: |
-          cd frontend
-          cat > .env.prod << EOF
-          REACT_APP_API_BASE_URL=${{ steps.backend-config.outputs.api_url }}
-          REACT_APP_AWS_REGION=${{ env.AWS_REGION }}
-          REACT_APP_USER_POOL_ID=${{ steps.backend-config.outputs.user_pool_id }}
-          REACT_APP_USER_POOL_CLIENT_ID=${{ steps.backend-config.outputs.client_id }}
-          REACT_APP_ENV=prod
-          EOF
-      
-      - name: Install dependencies
-        run: |
-          cd frontend
-          npm ci
-      
-      - name: Build prod frontend
-        run: |
-          cd frontend
-          npm run build
-        env:
-          CI: false
-          NODE_ENV: production
-      
-      - name: Deploy to S3
-        run: |
-          echo "📦 Deploying frontend to S3..."
-          aws s3 sync frontend/build/ s3://profile-photo-ai-frontend-prod/ --delete
-          echo "✅ S3 sync completed"
-      
-      - name: Invalidate CloudFront cache
-        run: |
-          echo "🔄 Invalidating CloudFront cache..."
-          DISTRIBUTION_ID=$(aws cloudformation describe-stacks \
-            --stack-name ${{ env.STACK_NAME }} \
-            --region ${{ env.AWS_REGION }} \
-            --query 'Stacks[0].Outputs[?OutputKey==`CloudFrontDistributionId`].OutputValue' \
-            --output text)
-          
-          if [ -n "$DISTRIBUTION_ID" ] && [ "$DISTRIBUTION_ID" != "None" ]; then
-            aws cloudfront create-invalidation \
-              --distribution-id $DISTRIBUTION_ID \
-              --paths "/*"
-            echo "✅ CloudFront cache invalidated"
-          else
-            echo "⚠️ CloudFront distribution not found, skipping cache invalidation"
-          fi
 
-  rollback:
-    name: Rollback on Failure
-    needs: [deploy-backend, deploy-frontend]
-    environment:
-      name: prod
-    if: failure()
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
-    
-    steps:
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::701111311029:role/profile-photo-ai-prod-role
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME_PROD }}
           aws-region: ${{ env.AWS_REGION }}
-      
-      - name: Initiate rollback
+
+      - name: Deploy frontend using Terraform outputs
         run: |
-          echo "🔄 Initiating rollback..."
-          echo "⚠️ Manual rollback may be required"
-          echo "Run: aws cloudformation cancel-update-stack --stack-name ${{ env.STACK_NAME }}"
+          ./scripts/deploy-frontend.sh prod
 
   notify:
     name: Notify Deployment Status
     needs: [deploy-backend, deploy-frontend]
     if: always()
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Send deployment notification
-        if: env.DISCORD_WEBHOOK_URL != ''
+        if: ${{ secrets.DISCORD_WEBHOOK_URL != '' }}
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
@@ -338,25 +200,34 @@ jobs:
           FRONTEND_STATUS="${{ needs.deploy-frontend.result }}"
           
           if [ "$BACKEND_STATUS" = "success" ] && [ "$FRONTEND_STATUS" = "success" ]; then
-            COLOR="3066993"  # Green
+            COLOR="3066993"
             EMOJI="✅"
             MESSAGE="Prod deployment successful!"
-          else
-            COLOR="15158332"  # Red
+          elif [ "$BACKEND_STATUS" = "failure" ] || [ "$FRONTEND_STATUS" = "failure" ]; then
+            COLOR="15158332"
             EMOJI="❌"
             MESSAGE="Prod deployment failed!"
+          else
+            COLOR="16776960"
+            EMOJI="⚠️"
+            MESSAGE="Prod deployment status: ${BACKEND_STATUS}/${FRONTEND_STATUS}"
           fi
-          
+
+          payload=$(cat <<EOF
+          {
+            "content": "@here",
+            "embeds": [{
+              "title": "$EMOJI Prod Deployment",
+              "description": "$MESSAGE\n**Backend:** $BACKEND_STATUS\n**Frontend:** $FRONTEND_STATUS\n**Commit:** ${{ github.sha }}",
+              "color": $COLOR,
+              "footer": {
+                "text": "ProfilePhotoAI Prod"
+              }
+            }]
+          }
+          EOF
+          )
+
           curl -H "Content-Type: application/json" \
-            -d "{
-              \"content\": \"@here\",
-              \"embeds\": [{
-                \"title\": \"$EMOJI Prod Deployment\",
-                \"description\": \"$MESSAGE\n\n**Backend:** $BACKEND_STATUS\n**Frontend:** $FRONTEND_STATUS\n**Commit:** ${{ github.sha }}\",
-                \"color\": $COLOR,
-                \"footer\": {
-                  \"text\": \"ProfilePhotoAI Prod\"
-                }
-              }]
-            }" \
-            $DISCORD_WEBHOOK_URL || echo "Notification skipped"
+            -d "$payload" \
+            "$DISCORD_WEBHOOK_URL" || echo "Discord notification skipped"

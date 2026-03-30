@@ -93,5 +93,5 @@ make deploy-frontend-dev
 
 ## 참고
 
-- GitHub Actions 워크플로우는 이번 전환 범위에서 손대지 않았습니다.
-- 기존 SAM/LocalStack 기반 경로는 제거되었습니다.
+- GitHub Actions 워크플로우는 Terraform/Cognito/Bedrock 배포 경로를 기준으로 정렬되어 있습니다.
+- 기존 SAM/Google OAuth 기반 경로는 제거되어 더 이상 사용되지 않습니다.
