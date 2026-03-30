@@ -68,7 +68,7 @@ export const ImageUploader = ({ onFileSelect, selectedFile }) => {
     if (isDesktop) {
       getDevices();
     }
-  }, [isDesktop]);
+  }, [isDesktop, selectedDeviceId]);
 
   const validateFile = (file) => {
     if (!FILE_CONFIG.ALLOWED_TYPES.includes(file.type)) {

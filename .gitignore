@@ -12,11 +12,9 @@ ENV/
 .cache/
 .python-version
 
-# AWS SAM
+# Lambda artifacts
 *.zip
 .aws-sam/
-samconfig.toml.bak
-packaged.yaml
 
 # Environment variables (⚠️ NEVER commit these files!)
 .env
@@ -24,9 +22,6 @@ packaged.yaml
 .env.production
 .env.development
 .env.*.local
-env.json
-env-local.json
-env-local-host.json
 
 # Config files with secrets
 config/dev.json
@@ -82,11 +77,6 @@ htmlcov/
 .tox/
 coverage/
 
-# LocalStack
-.localstack/
-localstack/
-localstack-data/
-
 # Temporary files
 *.tmp
 tmp/
@@ -99,9 +89,6 @@ tmp/
 *.bak
 *backup-*.json
 
-# SAM deployment artifacts
-samconfig.toml
-
 temp/
 
 # Documentation (temporary/generated)
@@ -112,9 +99,6 @@ PRODUCTION_READY.md
 PROPER_WORKFLOW.md
 COGNITO_AUTH_FIXED.md
 FRONTEND_S3_QUICKSTART.md
-GEMINI_2.5_FLASH_IMAGE_SETUP.md
-GOOGLE_OAUTH_COMPLETE.md
-GOOGLE_OAUTH_SETUP.md
 
 # Test data
 tests/test-data/*.jpg

@@ -26,7 +26,7 @@ http = urllib3.PoolManager()
 # 환경 변수
 WEBHOOK_URL = os.environ['WEBHOOK_URL']
 ENVIRONMENT = os.environ.get('ENVIRONMENT', 'dev')
-AWS_REGION = os.environ.get('AWS_REGION', 'ap-northeast-2')
+AWS_REGION = os.environ.get('AWS_REGION', 'ap-northeast-1')
 
 
 @logger.inject_lambda_context
@@ -146,25 +146,25 @@ def generate_logs_insights_link(alarm_name: str, namespace: str, metric_name: st
     query = ''
     
     if 'ImageProcess' in alarm_name:
-        log_group = f'/aws/lambda/Profile-Photo-AI-ImageProcess-{ENVIRONMENT}'
+        log_group = f'/aws/lambda/profile-photo-ai-image-process-{ENVIRONMENT}'
         if 'Error' in alarm_name:
             query = 'fields @timestamp, level, event, error, errorType, jobId | filter level = "ERROR" | sort @timestamp desc | limit 20'
-        elif 'Gemini' in alarm_name:
-            query = 'fields @timestamp, event, jobId, responseTime, error | filter event = "gemini_api_error" or event = "gemini_quota_exceeded" | sort @timestamp desc | limit 20'
+        elif 'Nova' in alarm_name or 'ImageGeneration' in alarm_name:
+            query = 'fields @timestamp, event, jobId, responseTimeMs, error | filter event = "nova_api_error" or event = "nova_api_slow_response" | sort @timestamp desc | limit 20'
         else:
             query = 'fields @timestamp, level, event, jobId, error | filter level = "ERROR" or level = "WARNING" | sort @timestamp desc | limit 20'
-    
+
     elif 'ApiManager' in alarm_name:
-        log_group = f'/aws/lambda/Profile-Photo-AI-ApiManager-{ENVIRONMENT}'
+        log_group = f'/aws/lambda/profile-photo-ai-api-manager-{ENVIRONMENT}'
         query = 'fields @timestamp, level, event, userId, error | filter level = "ERROR" or level = "WARNING" | sort @timestamp desc | limit 20'
-    
+
     elif 'FileTransfer' in alarm_name:
-        log_group = f'/aws/lambda/Profile-Photo-AI-FileTransfer-{ENVIRONMENT}'
+        log_group = f'/aws/lambda/profile-photo-ai-file-transfer-{ENVIRONMENT}'
         query = 'fields @timestamp, level, event, userId, error | filter level = "ERROR" or level = "WARNING" | sort @timestamp desc | limit 20'
-    
+
     else:
         # Default query
-        log_group = f'/aws/lambda/Profile-Photo-AI-ImageProcess-{ENVIRONMENT}'
+        log_group = f'/aws/lambda/profile-photo-ai-image-process-{ENVIRONMENT}'
         query = 'fields @timestamp, level, event, error | filter level = "ERROR" | sort @timestamp desc | limit 20'
     
     if not log_group:

@@ -20,7 +20,7 @@ logger = Logger()
 logs_client = boto3.client('logs')
 
 ENVIRONMENT = os.environ.get('ENVIRONMENT', 'dev')
-LOG_GROUP_NAME = f'/aws/lambda/profile-photo-ai-ImageProcess-{ENVIRONMENT}'
+LOG_GROUP_NAME = f'/aws/lambda/profile-photo-ai-image-process-{ENVIRONMENT}'
 DISCORD_WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL', '')
 
 

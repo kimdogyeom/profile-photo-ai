@@ -209,38 +209,6 @@
   font-size: 14px;
 }
 
-.auth-modal-btn-google {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  background: white;
-  border: 2px solid #e2e8f0;
-  padding: 12px;
-  border-radius: 8px;
-  font-size: 16px;
-  font-weight: 600;
-  color: #4a5568;
-  cursor: pointer;
-  transition: all 0.3s;
-  width: 100%;
-}
-
-.auth-modal-btn-google:hover:not(:disabled) {
-  border-color: #cbd5e0;
-  background-color: #f7fafc;
-}
-
-.auth-modal-btn-google:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.google-icon {
-  width: 20px;
-  height: 20px;
-}
-
 .auth-modal-footer {
   margin-top: 20px;
   display: flex;

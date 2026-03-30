@@ -1,395 +1,278 @@
-import boto3
-import os
+import base64
 import json
+import os
+import resource
 import sys
 import time
-import resource
-from urllib.parse import urlparse
-from google import genai
-from google.genai import types
-from PIL import Image
-from io import BytesIO
 from datetime import datetime
+from io import BytesIO
+from urllib.parse import urlparse
 
-# AWS Lambda Powertools
-from aws_lambda_powertools import Logger, Tracer, Metrics
+import boto3
+from aws_lambda_powertools import Logger, Metrics, Tracer
 from aws_lambda_powertools.metrics import MetricUnit
+from botocore.config import Config
+from PIL import Image
 
-# Lambda Layer에서 dynamodb_helper 임포트
-sys.path.append('/opt/python')
-from dynamodb_helper import ImageJobService, UserService
+BACKEND_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if BACKEND_ROOT not in sys.path:
+    sys.path.append(BACKEND_ROOT)
 
-# Powertools 초기화
+from common.dynamodb_helper import ImageJobService, UserService
+
 logger = Logger()
 tracer = Tracer()
 metrics = Metrics()
 
-# AWS 클라이언트 초기화 (LocalStack 지원)
-endpoint_url = os.environ.get('AWS_ENDPOINT_URL')
+endpoint_url = os.environ.get("AWS_ENDPOINT_URL")
+s3_kwargs = {}
 if endpoint_url:
-    logger.info("Using LocalStack S3 endpoint", extra={"endpoint_url": endpoint_url})
-    s3_client = boto3.client('s3', endpoint_url=endpoint_url)
-else:
-    logger.info("Using AWS S3")
-    s3_client = boto3.client('s3')
+    s3_kwargs["endpoint_url"] = endpoint_url
 
-secretsmanager_client = boto3.client('secretsmanager')
-api_gateway_client = None  # WebSocket 사용 시에만 초기화
+s3_client = boto3.client("s3", **s3_kwargs)
+bedrock_client = boto3.client(
+    "bedrock-runtime",
+    region_name=os.environ.get("BEDROCK_REGION", "ap-northeast-1"),
+    config=Config(read_timeout=300, retries={"max_attempts": 3, "mode": "standard"}),
+)
 
-# Gemini API 키 가져오기 (Secrets Manager 또는 환경 변수)
-def get_gemini_api_key():
-    """Secrets Manager에서 Gemini API 키를 가져오거나 환경 변수에서 읽기"""
-    # 1. 환경 변수에서 직접 확인 (로컬 테스트용)
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if api_key:
-        logger.info("환경 변수에서 Gemini API 키 사용 중")
-        return api_key
-
-    # 2. Secrets Manager ARN에서 가져오기 (프로덕션)
-    secret_arn = os.environ.get("GEMINI_API_KEY_SECRET_ARN")
-    if secret_arn:
-        try:
-            logger.info("Secrets Manager에서 Gemini API 키 조회 중", secret_arn=secret_arn)
-            response = secretsmanager_client.get_secret_value(SecretId=secret_arn)
-            secret_string = response['SecretString']
-
-            # JSON이 아니면 plain text로 처리
-            return secret_string.strip()
-        except Exception as e:
-            logger.error("Secrets Manager에서 Gemini API 키 조회 실패", error=str(e), secret_arn=secret_arn)
-    
-    raise ValueError("GEMINI_API_KEY not found in Secrets Manager or environment variables")
-
-# Gemini API 설정
-GEMINI_API_KEY = get_gemini_api_key()
-
-# google-genai 클라이언트 초기화
-client = genai.Client(api_key=GEMINI_API_KEY)
-
-# 환경 변수
-RESULT_BUCKET = os.environ.get('RESULT_BUCKET')
-MODEL_NAME = os.environ.get('MODEL_NAME')
+RESULT_BUCKET = os.environ["RESULT_BUCKET"]
+BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "amazon.nova-canvas-v1:0")
+BEDROCK_TASK_TYPE = os.environ.get("BEDROCK_IMAGE_TASK_TYPE", "IMAGE_VARIATION")
+BEDROCK_IMAGE_WIDTH = int(os.environ.get("BEDROCK_IMAGE_WIDTH", "1024"))
+BEDROCK_IMAGE_HEIGHT = int(os.environ.get("BEDROCK_IMAGE_HEIGHT", "1024"))
+BEDROCK_IMAGE_QUALITY = os.environ.get("BEDROCK_IMAGE_QUALITY", "standard")
+BEDROCK_CFG_SCALE = float(os.environ.get("BEDROCK_CFG_SCALE", "6.5"))
+BEDROCK_NUMBER_OF_IMAGES = int(os.environ.get("BEDROCK_NUMBER_OF_IMAGES", "1"))
+BEDROCK_SIMILARITY_STRENGTH = float(os.environ.get("BEDROCK_SIMILARITY_STRENGTH", "0.8"))
+NEGATIVE_PROMPT = os.environ.get(
+    "BEDROCK_NEGATIVE_PROMPT",
+    "blurry, distorted face, extra fingers, multiple people, text, watermark, logo, cluttered background, low quality, overexposed, underexposed",
+)
 WEBSOCKET_ENDPOINT = os.environ.get("WEBSOCKET_ENDPOINT")
 
-# WebSocket 클라이언트 초기화 (사용 가능한 경우)
+api_gateway_client = None
 if WEBSOCKET_ENDPOINT:
-    api_gateway_client = boto3.client('apigatewaymanagementapi', endpoint_url=WEBSOCKET_ENDPOINT)
+    api_gateway_client = boto3.client("apigatewaymanagementapi", endpoint_url=WEBSOCKET_ENDPOINT)
 
 
 @logger.inject_lambda_context
 @tracer.capture_lambda_handler
 @metrics.log_metrics(capture_cold_start_metric=True)
 def lambda_handler(event, context):
-    """
-    SQS 메시지를 처리하여 Gemini API로 이미지를 생성하고 결과를 S3에 저장합니다.
-    DynamoDB에 작업 상태를 업데이트하고, WebSocket이 있으면 실시간 알림을 전송합니다.
-    """
     processed_count = 0
     failed_count = 0
-    
-    # 배치 크기 메트릭
-    batch_size = len(event['Records'])
+
+    batch_size = len(event["Records"])
     metrics.add_metric(name="BatchSize", unit=MetricUnit.Count, value=batch_size)
-    
-    for record in event['Records']:
+
+    for record in event["Records"]:
         job_id = None
         user_id = None
+        connection_id = None
         start_time = time.time()
-        
+
         try:
-            # SQS 메시지 파싱
-            message_body = json.loads(record['body'])
-            job_id = message_body.get('jobId')
-            user_id = message_body.get('userId')
-            s3_uri = message_body.get('s3_uri')
-            prompt = message_body.get('prompt')
-            style = message_body.get('style', 'professional')
-            connection_id = message_body.get('connectionId')  # WebSocket (선택적)
+            body = json.loads(record["body"])
+            job_id = body.get("jobId")
+            user_id = body.get("userId")
+            prompt = body.get("prompt")
+            style = body.get("style", "formal_interview")
+            s3_uri = body.get("s3Uri")
+            connection_id = body.get("connectionId")
 
-            logger.info('job_processing_started',
-                jobId=job_id,
-                userId=user_id,
-                style=style,
-                s3Uri=s3_uri)
+            if not all([job_id, user_id, prompt, s3_uri]):
+                raise ValueError("Missing required fields in SQS message")
 
-            # 필수 데이터 검증
-            if not all([job_id, user_id, s3_uri, prompt]):
-                raise ValueError("Missing required data in SQS message")
+            ImageJobService.update_job_status(job_id, "processing")
 
-            # Job 상태를 processing으로 업데이트
-            ImageJobService.update_job_status(job_id, 'processing')
+            source_bucket, source_key = parse_s3_uri(s3_uri)
+            input_bytes, download_ms, source_format = download_source_image(source_bucket, source_key)
+            generated_bytes, generation_ms = generate_with_bedrock(input_bytes, source_format, prompt)
 
-            # 1. S3에서 입력 이미지 다운로드
-            parsed_uri = urlparse(s3_uri)
-            input_bucket = parsed_uri.netloc
-            input_key = parsed_uri.path.lstrip('/')
-
-            download_start = time.time()
-            response = s3_client.get_object(Bucket=input_bucket, Key=input_key)
-            input_image_bytes = response['Body'].read()
-            input_image = Image.open(BytesIO(input_image_bytes))
-            download_time = (time.time() - download_start) * 1000
-
-            logger.info('image_downloaded',
-                jobId=job_id,
-                fileSize=len(input_image_bytes),
-                downloadTime=download_time,
-                imageSize=f"{input_image.width}x{input_image.height}")
-
-            # 2. Gemini API로 이미지 생성 요청 (google-genai)
-            logger.info('gemini_api_request',
-                jobId=job_id,
-                promptLength=len(prompt),
-                modelName=MODEL_NAME)
-            
-            generation_start = time.time()
-            
-            # PIL Image를 bytes로 변환
-            img_byte_arr = BytesIO()
-            input_image.save(img_byte_arr, format='PNG')
-            img_byte_arr.seek(0)
-            image_bytes = img_byte_arr.read()
-            
-            # google-genai API로 이미지 생성 요청
-            # 텍스트와 이미지를 함께 전달
-            response = client.models.generate_content(
-                model=MODEL_NAME,
-                contents=[
-                    prompt,  # 텍스트 프롬프트
-                    types.Part(inline_data=types.Blob(
-                        data=image_bytes,
-                        mime_type='image/png'
-                    ))
-                ]
-            )
-            
-            generation_time = (time.time() - generation_start) * 1000
-            
-            # Gemini API 응답 시간 메트릭
-            metrics.add_metric(name="GeminiAPIResponseTime", unit=MetricUnit.Milliseconds, value=generation_time)
-            
-            # 느린 응답 경고
-            if generation_time > 30000:  # 30초 초과
-                logger.warning('gemini_api_slow_response',
-                    jobId=job_id,
-                    responseTime=generation_time,
-                    threshold=30000)
-
-            # 응답 검증
-            if not response.candidates:
-                raise Exception("Image generation failed: no candidates in response")
-            
-            candidate = response.candidates[0]
-            
-            # finish_reason 확인
-            if hasattr(candidate, 'finish_reason'):
-                finish_reason = str(candidate.finish_reason)
-                if 'STOP' not in finish_reason.upper() and finish_reason != '1':
-                    logger.warning('unexpected_finish_reason',
-                        jobId=job_id,
-                        finishReason=finish_reason)
-            
-            
-            # 응답에서 생성된 이미지 데이터 추출
-            generated_image_bytes = None
-            
-            if hasattr(candidate, 'content') and hasattr(candidate.content, 'parts'):
-                for part in candidate.content.parts:
-                    # inline_data 속성 확인 (생성된 이미지)
-                    if hasattr(part, 'inline_data') and part.inline_data:
-                        generated_image_bytes = part.inline_data.data
-                        mime_type = getattr(part.inline_data, 'mime_type', 'unknown')
-                        logger.info('gemini_api_success',
-                            jobId=job_id,
-                            responseTime=generation_time,
-                            mimeType=mime_type,
-                            imageSize=len(generated_image_bytes))
-                        break
-                    # text 응답인 경우 (설명만 생성된 경우)
-                    elif hasattr(part, 'text') and part.text:
-                        logger.warning('gemini_text_response',
-                            jobId=job_id,
-                            textPreview=part.text[:200])
-
-            if not generated_image_bytes:
-                error_msg = "Image generation failed: no image data in response"
-                logger.error('gemini_api_error',
-                    jobId=job_id,
-                    error=error_msg,
-                    responseStructure=str(candidate)[:500])
-                raise Exception(error_msg)
-
-            logger.info('image_generated',
-                jobId=job_id,
-                generationTime=generation_time,
-                outputSize=len(generated_image_bytes))
-
-            # 3. 생성된 이미지를 결과 S3 버킷에 업로드
             output_key = f"generated/{user_id}/{job_id}.png"
-            upload_start = time.time()
-            
-            s3_client.put_object(
-                Bucket=RESULT_BUCKET,
-                Key=output_key,
-                Body=generated_image_bytes,
-                ContentType='image/png',
-                ServerSideEncryption='AES256',
-                Metadata={
-                    'userId': user_id,
-                    'jobId': job_id,
-                    'style': style,
-                    'generatedAt': datetime.utcnow().isoformat()
-                }
-            )
-            
-            upload_time = (time.time() - upload_start) * 1000
+            upload_ms = upload_result_image(output_key, generated_bytes, user_id, job_id, style)
             output_s3_uri = f"s3://{RESULT_BUCKET}/{output_key}"
-            
-            logger.info('s3_upload_success',
-                jobId=job_id,
-                s3Uri=output_s3_uri,
-                uploadTime=upload_time,
-                fileSize=len(generated_image_bytes))
+            processing_ms = (time.time() - start_time) * 1000
 
-            # 5. DynamoDB에 작업 완료 상태 업데이트 (S3 URI만 저장)
-            processing_time = (time.time() - start_time) * 1000
             ImageJobService.update_job_status(
                 job_id=job_id,
-                status='completed',
-                output_url=output_s3_uri,  # S3 URI 저장 (API에서 Presigned URL 생성)
-                processing_time=float(processing_time),
+                status="completed",
+                output_url=output_s3_uri,
+                processing_time=processing_ms,
                 metadata={
-                    'generationTime': float(generation_time),
-                    'modelName': MODEL_NAME,
-                    'outputKey': output_key,  # Presigned URL 생성에 사용
-                    's3Uri': output_s3_uri
-                }
+                    "modelId": BEDROCK_MODEL_ID,
+                    "taskType": BEDROCK_TASK_TYPE,
+                    "outputKey": output_key,
+                    "resultBucket": RESULT_BUCKET,
+                    "s3Uri": output_s3_uri,
+                    "generationTimeMs": generation_ms,
+                    "downloadTimeMs": download_ms,
+                    "uploadTimeMs": upload_ms,
+                },
             )
 
-            # 6. 사용자 통계 업데이트
             UserService.increment_total_images(user_id)
-            
-            # 메모리 사용량 추적
-            memory_used = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024  # MB
-            
-            logger.info('job_completed',
-                jobId=job_id,
-                userId=user_id,
-                processingTime=processing_time,
-                generationTime=generation_time,
-                downloadTime=download_time,
-                uploadTime=upload_time,
-                memoryUsed=memory_used,
-                outputSize=len(generated_image_bytes))
-            
-            # 성공 메트릭 추가
-            metrics.add_metric(name="ImageGenerationSuccess", unit=MetricUnit.Count, value=1)
-            metrics.add_metric(name="TotalProcessingTime", unit=MetricUnit.Milliseconds, value=processing_time)
-            metrics.add_metric(name="MemoryUsed", unit=MetricUnit.Megabytes, value=memory_used)
 
-            # 7. WebSocket으로 결과 전송 (연결이 있는 경우)
+            memory_used_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+            logger.info(
+                "Image generation completed",
+                extra={
+                    "jobId": job_id,
+                    "userId": user_id,
+                    "processingTimeMs": processing_ms,
+                    "generationTimeMs": generation_ms,
+                    "memoryUsedMb": memory_used_mb,
+                },
+            )
+
+            metrics.add_metric(name="ImageGenerationSuccess", unit=MetricUnit.Count, value=1)
+            metrics.add_metric(name="TotalProcessingTime", unit=MetricUnit.Milliseconds, value=processing_ms)
+            metrics.add_metric(name="NovaAPIResponseTime", unit=MetricUnit.Milliseconds, value=generation_ms)
+
             if connection_id and api_gateway_client:
-                try:
-                    notification_data = {
-                        'type': 'image_completed',
-                        'jobId': job_id,
-                        'status': 'completed',
-                        's3Uri': output_s3_uri,
-                        'processingTime': processing_time
-                    }
-                    api_gateway_client.post_to_connection(
-                        ConnectionId=connection_id,
-                        Data=json.dumps(notification_data).encode('utf-8')
-                    )
-                    logger.info('websocket_notification_sent',
-                        jobId=job_id,
-                        connectionId=connection_id,
-                        notificationType='image_completed')
-                except Exception as ws_error:
-                    logger.warning('websocket_notification_failed',
-                        jobId=job_id,
-                        connectionId=connection_id,
-                        error=str(ws_error))
+                send_websocket_notification(
+                    connection_id,
+                    {
+                        "type": "image_completed",
+                        "jobId": job_id,
+                        "status": "completed",
+                        "s3Uri": output_s3_uri,
+                        "processingTime": processing_ms,
+                    },
+                )
 
             processed_count += 1
-
-        except Exception as e:
+        except Exception as error:
             failed_count += 1
-            error_message = str(e)
-            
-            import traceback
-            error_traceback = traceback.format_exc()
-            
-            # 메모리 사용량 추적 (에러 시에도)
-            try:
-                memory_used = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
-            except:
-                memory_used = None
-            
-            # 실패 메트릭 추가
+            processing_ms = (time.time() - start_time) * 1000
             metrics.add_metric(name="ImageGenerationFailure", unit=MetricUnit.Count, value=1)
-            
-            logger.error('job_failed',
-                jobId=job_id,
-                userId=user_id,
-                error=error_message,
-                errorType=type(e).__name__,
-                processingTime=(time.time() - start_time) * 1000 if start_time else None,
-                memoryUsed=memory_used,
-                traceback=error_traceback[:500])
 
-            # DynamoDB에 실패 상태 기록
+            logger.exception(
+                "Image generation failed",
+                extra={"jobId": job_id, "userId": user_id, "processingTimeMs": processing_ms, "error": str(error)},
+            )
+
             if job_id:
                 try:
-                    processing_time = (time.time() - start_time) * 1000
                     ImageJobService.update_job_status(
-                        job_id=job_id,
-                        status='failed',
-                        error=error_message,
-                        processing_time=processing_time
+                        job_id=job_id, status="failed", error=str(error), processing_time=processing_ms
                     )
-                except Exception as db_error:
-                    logger.error('dynamodb_update_failed',
-                        jobId=job_id,
-                        error=str(db_error),
-                        errorType=type(db_error).__name__)
+                except Exception:
+                    logger.exception("Failed to persist failed job state", extra={"jobId": job_id})
 
-            # WebSocket으로 에러 메시지 전송 (연결이 있는 경우)
-            if 'connection_id' in locals() and connection_id and api_gateway_client:
-                try:
-                    error_notification = {
-                        'type': 'image_failed',
-                        'jobId': job_id,
-                        'status': 'failed',
-                        'error': error_message
-                    }
-                    api_gateway_client.post_to_connection(
-                        ConnectionId=connection_id,
-                        Data=json.dumps(error_notification).encode('utf-8')
-                    )
-                    logger.info('websocket_error_notification_sent',
-                        jobId=job_id,
-                        connectionId=connection_id)
-                except Exception as api_error:
-                    logger.warning('websocket_error_notification_failed',
-                        jobId=job_id,
-                        error=str(api_error))
+            if connection_id and api_gateway_client:
+                send_websocket_notification(
+                    connection_id,
+                    {"type": "image_failed", "jobId": job_id, "status": "failed", "error": str(error)},
+                )
 
-    # 최종 배치 처리 결과
-    logger.info('batch_processing_complete',
-        totalRecords=len(event['Records']),
-        processedCount=processed_count,
-        failedCount=failed_count)
-    
-    # 배치 처리 결과 메트릭
+    logger.info(
+        "Batch processing complete",
+        extra={"totalRecords": len(event["Records"]), "processedCount": processed_count, "failedCount": failed_count},
+    )
     metrics.add_metric(name="BatchProcessed", unit=MetricUnit.Count, value=processed_count)
     metrics.add_metric(name="BatchFailed", unit=MetricUnit.Count, value=failed_count)
-    
+
     return {
-        'statusCode': 200,
-        'body': json.dumps({
-            'message': 'Processing complete',
-            'processed': processed_count,
-            'failed': failed_count
-        })
+        "statusCode": 200,
+        "body": json.dumps({"message": "Processing complete", "processed": processed_count, "failed": failed_count}),
     }
+
+
+def parse_s3_uri(s3_uri):
+    parsed = urlparse(s3_uri)
+    return parsed.netloc, parsed.path.lstrip("/")
+
+
+def download_source_image(bucket, key):
+    download_start = time.time()
+    response = s3_client.get_object(Bucket=bucket, Key=key)
+    image_bytes = response["Body"].read()
+
+    with Image.open(BytesIO(image_bytes)) as image:
+        source_format = (image.format or "PNG").upper()
+
+    return image_bytes, (time.time() - download_start) * 1000, source_format
+
+
+def generate_with_bedrock(image_bytes, source_format, prompt):
+    image_format = "PNG" if source_format not in {"PNG", "JPEG", "JPG"} else source_format
+    canonical_bytes = image_bytes
+
+    if image_format == "JPG":
+        image_format = "JPEG"
+
+    if image_format not in {"PNG", "JPEG"}:
+        with Image.open(BytesIO(image_bytes)) as image:
+            converted = BytesIO()
+            image.convert("RGB").save(converted, format="PNG")
+            canonical_bytes = converted.getvalue()
+        image_format = "PNG"
+
+    request_body = {
+        "taskType": BEDROCK_TASK_TYPE,
+        "imageVariationParams": {
+            "images": [base64.b64encode(canonical_bytes).decode("utf-8")],
+            "similarityStrength": BEDROCK_SIMILARITY_STRENGTH,
+            "text": prompt[:1024],
+            "negativeText": NEGATIVE_PROMPT[:1024],
+        },
+        "imageGenerationConfig": {
+            "width": BEDROCK_IMAGE_WIDTH,
+            "height": BEDROCK_IMAGE_HEIGHT,
+            "quality": BEDROCK_IMAGE_QUALITY,
+            "cfgScale": BEDROCK_CFG_SCALE,
+            "numberOfImages": BEDROCK_NUMBER_OF_IMAGES,
+        },
+    }
+
+    generation_start = time.time()
+    response = bedrock_client.invoke_model(
+        modelId=BEDROCK_MODEL_ID,
+        contentType="application/json",
+        accept="application/json",
+        body=json.dumps(request_body),
+    )
+    response_body = json.loads(response["body"].read())
+    generation_ms = (time.time() - generation_start) * 1000
+
+    if generation_ms > 30000:
+        logger.warning("nova_api_slow_response", extra={"responseTimeMs": generation_ms})
+
+    if response_body.get("error"):
+        logger.error("nova_api_error", extra={"error": response_body["error"]})
+        raise RuntimeError(response_body["error"])
+
+    images = response_body.get("images") or []
+    if not images:
+        raise RuntimeError("Nova Canvas returned no images")
+
+    generated_bytes = base64.b64decode(images[0])
+    return generated_bytes, generation_ms
+
+
+def upload_result_image(output_key, generated_bytes, user_id, job_id, style):
+    upload_start = time.time()
+    s3_client.put_object(
+        Bucket=RESULT_BUCKET,
+        Key=output_key,
+        Body=generated_bytes,
+        ContentType="image/png",
+        ServerSideEncryption="AES256",
+        Metadata={
+            "userId": user_id,
+            "jobId": job_id,
+            "style": style,
+            "generatedAt": datetime.utcnow().isoformat(),
+            "modelId": BEDROCK_MODEL_ID,
+        },
+    )
+    return (time.time() - upload_start) * 1000
+
+
+def send_websocket_notification(connection_id, payload):
+    try:
+        api_gateway_client.post_to_connection(ConnectionId=connection_id, Data=json.dumps(payload).encode("utf-8"))
+    except Exception:
+        logger.exception("Failed to send websocket notification", extra={"connectionId": connection_id})

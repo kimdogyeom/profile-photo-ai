@@ -3,11 +3,10 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import { GeneratePage } from './pages/GeneratePage';
-import { CallbackPage } from './pages/CallbackPage';
 import AuthModal from './components/auth/AuthModal';
 import { PhoneFrame } from './components/PhoneFrame';
 import { Logo } from './components/Logo';
-import { PaletteIcon, ZapIcon, TargetIcon, UploadIcon, GoogleIcon } from './components/Icons';
+import { PaletteIcon, ZapIcon, TargetIcon, UploadIcon } from './components/Icons';
 import { isAuthenticated, logout, getUserInfo } from './services/auth';
 import './App.css';
 
@@ -54,7 +53,6 @@ function App() {
           style={{ zIndex: 9999 }}
         />
         <Routes>
-          <Route path="/callback" element={<CallbackPage />} />
           <Route 
             path="/generate" 
             element={
@@ -94,7 +92,6 @@ const LandingPage = () => {
   };
 
   const handleAuthSuccess = () => {
-    console.log('✅ Auth successful, redirecting to generate page');
     window.location.href = '/generate';
   };
 
@@ -358,24 +355,6 @@ const styles = {
     color: '#808080',
     fontSize: '14px',
     zIndex: 1,
-  },
-  googleButton: {
-    width: '100%',
-    padding: '14px 24px',
-    fontSize: '16px',
-    fontWeight: '600',
-    color: '#3c4043',
-    background: 'white',
-    border: '1px solid #dadce0',
-    borderRadius: '12px',
-    cursor: 'pointer',
-    transition: 'all 0.3s ease',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '12px',
-    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
-    marginBottom: '24px',
   },
   note: {
     fontSize: '14px',

@@ -2,13 +2,13 @@ import React, { useEffect, useState } from 'react';
 import { getUserInfo } from '../services/api';
 import './UsageQuota.css';
 
-export const UsageQuota = () => {
+export const UsageQuota = ({ refreshKey = 0 }) => {
   const [usage, setUsage] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     fetchUsage();
-  }, []);
+  }, [refreshKey]);
 
   const fetchUsage = async () => {
     try {
@@ -20,11 +20,11 @@ export const UsageQuota = () => {
       });
     } catch (error) {
       console.error('Failed to fetch usage:', error);
-      // Mock data for development
       setUsage({
-        remaining: 3,
-        limit: 5,
-        used: 2
+        remaining: 0,
+        limit: 0,
+        used: 0,
+        error: true
       });
     } finally {
       setLoading(false);
@@ -32,8 +32,9 @@ export const UsageQuota = () => {
   };
 
   if (loading) return <div className="usage-loading">Loading...</div>;
+  if (usage?.error) return <div className="usage-loading">사용량 정보를 불러오지 못했습니다.</div>;
 
-  const percentage = (usage.used / usage.limit) * 100;
+  const percentage = usage.limit > 0 ? (usage.used / usage.limit) * 100 : 0;
 
   return (
     <div className="usage-quota">

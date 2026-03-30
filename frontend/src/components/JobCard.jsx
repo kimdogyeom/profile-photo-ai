@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { STYLE_PROMPTS } from '../config/prompts';
 import './JobCard.css';
 
 export const JobCard = ({ job, onRetry }) => {
@@ -48,13 +49,7 @@ export const JobCard = ({ job, onRetry }) => {
   };
 
   const formatStyle = (style) => {
-    const styles = {
-      professional: '프로페셔널',
-      casual: '캐주얼',
-      artistic: '아티스틱',
-      vintage: '빈티지'
-    };
-    return styles[style] || style;
+    return STYLE_PROMPTS[style]?.name || style;
   };
 
   return (

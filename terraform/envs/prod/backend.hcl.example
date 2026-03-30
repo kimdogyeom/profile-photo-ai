@@ -1,0 +1,5 @@
+bucket         = "profile-photo-ai-terraform-state"
+key            = "profile-photo-ai/prod/terraform.tfstate"
+region         = "ap-northeast-1"
+dynamodb_table = "profile-photo-ai-terraform-locks"
+encrypt        = true

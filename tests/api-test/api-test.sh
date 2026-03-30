@@ -26,7 +26,7 @@ aws cognito-idp admin-create-user \
   --user-attributes Name=email,Value="$TEST_USER_EMAIL" Name=email_verified,Value=true \
   --temporary-password "$TEST_USER_TEMP_PASS" \
   --message-action SUPPRESS \
-  --region ap-northeast-2 > /dev/null 2>&1 || true
+  --region ap-northeast-1 > /dev/null 2>&1 || true
 
 # 사용자의 비밀번호를 영구적으로 설정
 aws cognito-idp admin-set-user-password \
@@ -34,7 +34,7 @@ aws cognito-idp admin-set-user-password \
   --username "$TEST_USER_EMAIL" \
   --password "$TEST_USER_PERM_PASS" \
   --permanent \
-  --region ap-northeast-2
+  --region ap-northeast-1
 
 echo "✅ 테스트 사용자 설정 완료!"
 echo "------------------------------------"
@@ -47,7 +47,7 @@ TOKEN=$(aws cognito-idp initiate-auth \
   --auth-flow USER_PASSWORD_AUTH \
   --client-id "$CLIENT_ID" \
   --auth-parameters "USERNAME=$TEST_USER_EMAIL,PASSWORD=$TEST_USER_PERM_PASS" \
-  --region ap-northeast-2 \
+  --region ap-northeast-1 \
   --query 'AuthenticationResult.IdToken' \
   --output text)
 
