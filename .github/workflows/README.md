@@ -20,6 +20,9 @@ SAM, CloudFormation 출력, Google OAuth 관련 단계는 모두 제거되었습
   - 테스트(옵션 스킵 가능)
   - `./scripts/build-lambdas.sh`
   - `./scripts/tf.sh init dev` + `./scripts/tf.sh validate dev` + `./scripts/tf.sh plan dev -out=tfplan`
+  - `tfplan`(바이너리) 및 `tfplan.txt`(텍스트 뷰) 생성 후 아티팩트 업로드
+    - 업로드명: `tfplan-dev-${{ github.sha }}-${{ github.run_id }}`
+    - 보존 기간: `3`일
   - `./scripts/tf.sh apply dev -auto-approve tfplan`
   - API `/health` 헬스체크
   - `./scripts/deploy-frontend.sh dev`로 프론트 배포
@@ -29,7 +32,10 @@ SAM, CloudFormation 출력, Google OAuth 관련 단계는 모두 제거되었습
 - 수행:
   - prod 배포 전 `DEPLOY` 확인 입력 검증
   - 테스트 실행
-  - 동일한 Terraform 배포 파이프라인(`prod`)
+- 동일한 Terraform 배포 파이프라인(`prod`)
+  - `tfplan`(바이너리) 및 `tfplan.txt`(텍스트 뷰) 생성 후 아티팩트 업로드
+    - 업로드명: `tfplan-prod-${{ github.sha }}-${{ github.run_id }}`
+    - 보존 기간: `14`일
   - 프론트엔드 배포
   - Discord 알림
 
