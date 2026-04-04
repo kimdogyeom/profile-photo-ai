@@ -423,6 +423,7 @@ module "file_transfer" {
   description   = "Generate authenticated S3 upload forms"
   handler       = "file_transfer.lambda_handler"
   source_zip    = var.lambda_artifact_paths["file_transfer"]
+  create_inline_policy = true
   policy_json   = data.aws_iam_policy_document.file_transfer.json
   environment_variables = {
     UPLOAD_BUCKET                = aws_s3_bucket.upload.bucket
@@ -490,6 +491,7 @@ module "api_manager" {
   handler       = "api_manager.lambda_handler"
   timeout       = 60
   source_zip    = var.lambda_artifact_paths["api_manager"]
+  create_inline_policy = true
   policy_json   = data.aws_iam_policy_document.api_manager.json
   environment_variables = {
     SQS_QUEUE_URL                = aws_sqs_queue.image_process.id
@@ -559,6 +561,7 @@ module "image_process" {
   timeout       = 900
   memory_size   = 2048
   source_zip    = var.lambda_artifact_paths["image_process"]
+  create_inline_policy = true
   policy_json   = data.aws_iam_policy_document.image_process.json
   environment_variables = {
     RESULT_BUCKET                = aws_s3_bucket.result.bucket
@@ -602,6 +605,7 @@ module "stats_aggregator" {
   handler       = "stats_aggregator.lambda_handler"
   timeout       = 60
   source_zip    = var.lambda_artifact_paths["stats_aggregator"]
+  create_inline_policy = true
   policy_json   = data.aws_iam_policy_document.stats_aggregator.json
   environment_variables = {
     ENVIRONMENT             = var.environment

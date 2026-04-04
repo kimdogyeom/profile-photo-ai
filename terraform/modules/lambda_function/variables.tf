@@ -48,6 +48,11 @@ variable "policy_json" {
   default = null
 }
 
+variable "create_inline_policy" {
+  type    = bool
+  default = false
+}
+
 variable "log_retention_in_days" {
   type    = number
   default = 14
