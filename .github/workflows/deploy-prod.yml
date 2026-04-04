@@ -206,12 +206,12 @@ jobs:
           fi
           HEALTH_RESPONSE="$(curl --fail-with-body --silent --show-error "${API_URL}/healthz")"
           HEALTH_RESPONSE="$HEALTH_RESPONSE" python - <<'PY'
-import json
-import os
+          import json
+          import os
 
-body = json.loads(os.environ["HEALTH_RESPONSE"])
-assert body["status"] == "ok"
-PY
+          body = json.loads(os.environ["HEALTH_RESPONSE"])
+          assert body["status"] == "ok"
+          PY
 
   deploy-frontend:
     name: Deploy Frontend to Prod
