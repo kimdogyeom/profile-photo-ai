@@ -28,20 +28,17 @@ git secrets --register-aws
 # 프로젝트별 커스텀 패턴 추가
 echo "🎯 커스텀 패턴 등록 중..."
 
-# Gemini API Key 패턴
-git secrets --add 'AIzaSy[0-9A-Za-z_-]{33}'
-
 # Cognito User Pool ID 패턴
-git secrets --add 'ap-northeast-2_[a-zA-Z0-9]{9}'
+git secrets --add 'ap-northeast-1_[a-zA-Z0-9]{9}'
 
 # Cognito Client ID 패턴 (26자 소문자+숫자)
 git secrets --add '[a-z0-9]{26}'
 
 # API Gateway ID 패턴
-git secrets --add '[a-z0-9]{10}\.execute-api\.ap-northeast-2\.amazonaws\.com'
+git secrets --add '[a-z0-9]{10}\.execute-api\.ap-northeast-1\.amazonaws\.com'
 
 # 환경 변수 값 패턴 (따옴표 안의 실제 값)
-git secrets --add '(REACT_APP_|AWS_|GEMINI_)[A-Z_]+=["\x27][^"\x27]+["\x27]'
+git secrets --add '(REACT_APP_|AWS_|BEDROCK_)[A-Z_]+=["\x27][^"\x27]+["\x27]'
 
 # 허용 패턴 추가 (false positive 방지)
 echo "✅ 허용 패턴 등록 중..."
@@ -56,8 +53,7 @@ git secrets --add --allowed '000000000000'
 # 예제 플레이스홀더
 git secrets --add --allowed 'xxxxxxxxxxxxxxxxxxxxxxxxxx'
 git secrets --add --allowed 'your-api-id'
-git secrets --add --allowed 'ap-northeast-2_xxxxxxxxx'
-git secrets --add --allowed 'AIzaSy.*EXAMPLE'
+git secrets --add --allowed 'ap-northeast-1_xxxxxxxxx'
 
 # 환경 변수 파일 샘플은 허용
 git secrets --add --allowed '\.env\.example'

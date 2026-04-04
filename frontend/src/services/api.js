@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { getIdToken, isAuthenticated, refreshTokens } from './auth';
+import { getIdToken, isAuthenticated, logout, refreshTokens } from './auth';
 
 const API_BASE_URL = process.env.REACT_APP_API_BASE_URL;
 
@@ -26,6 +26,7 @@ const apiClient = axios.create({
 
 apiClient.interceptors.request.use(async (config) => {
   const token = await getAuthToken();
+  config.headers = config.headers || {};
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -40,7 +41,7 @@ apiClient.interceptors.response.use(
   async (error) => {
     if (error.response?.status === 401) {
       console.error('Unauthorized - token may be invalid or expired');
-      // Redirect to login
+      logout();
       window.location.href = '/';
     }
     return Promise.reject(error);
@@ -56,20 +57,44 @@ export const getUploadUrl = async (file) => {
   
   return {
     uploadUrl: response.data.uploadUrl,
+    uploadMethod: response.data.uploadMethod,
+    uploadFields: response.data.uploadFields,
     fileKey: response.data.fileKey,
     expiresIn: response.data.expiresIn
   };
 };
 
-export const uploadToS3 = async (uploadUrl, file) => {
-  await fetch(uploadUrl, {
-    method: 'PUT',
+export const uploadToS3 = async ({ uploadUrl, uploadMethod = 'POST', uploadFields = {}, file }) => {
+  if (uploadMethod === 'POST') {
+    const formData = new FormData();
+    Object.entries(uploadFields).forEach(([key, value]) => {
+      formData.append(key, value);
+    });
+    formData.append('file', file);
+
+    const response = await fetch(uploadUrl, {
+      method: 'POST',
+      body: formData
+    });
+
+    if (!response.ok) {
+      throw new Error(`S3 upload failed with status ${response.status}`);
+    }
+
+    return;
+  }
+
+  const response = await fetch(uploadUrl, {
+    method: uploadMethod,
     body: file,
     headers: {
-      'Content-Type': file.type,
-      'x-amz-server-side-encryption': 'AES256'
+      'Content-Type': file.type
     }
   });
+
+  if (!response.ok) {
+    throw new Error(`S3 upload failed with status ${response.status}`);
+  }
 };
 
 export const generateImage = async ({ fileKey, prompt, style }) => {
@@ -87,8 +112,8 @@ export const generateImage = async ({ fileKey, prompt, style }) => {
 };
 
 export const uploadImage = async (file) => {
-  const { uploadUrl, fileKey } = await getUploadUrl(file);
-  await uploadToS3(uploadUrl, file);
+  const { uploadUrl, uploadMethod, uploadFields, fileKey } = await getUploadUrl(file);
+  await uploadToS3({ uploadUrl, uploadMethod, uploadFields, file });
   return { fileKey };
 };
 
@@ -116,6 +141,7 @@ export const getUserJobs = async (limit = 50, nextToken = null) => {
   const response = await apiClient.get('/user/jobs', { params });
   return {
     jobs: response.data.jobs || [],
-    nextToken: response.data.nextToken || null
+    nextToken: response.data.nextToken || null,
+    hasMore: Boolean(response.data.hasMore)
   };
 };

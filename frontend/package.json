@@ -2,6 +2,9 @@
   "name": "profile-photo-ai-frontend",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": "20.19.x"
+  },
   "dependencies": {
     "amazon-cognito-identity-js": "^6.3.15",
     "axios": "^1.6.0",
@@ -14,8 +17,10 @@
   },
   "scripts": {
     "start": "react-scripts start",
+    "prebuild": "node scripts/validate-env.js",
     "build": "react-scripts build",
     "test": "react-scripts test",
+    "test:ci": "CI=true react-scripts test --watch=false --runInBand",
     "eject": "react-scripts eject"
   },
   "eslintConfig": {

@@ -1,73 +1,110 @@
-# ProfilePhotoAI 🖼️
+# ProfilePhotoAI
 
-AI 기반 프로필/증명사진 생성 서비스
+AWS Bedrock Nova Canvas 기반 프로필 사진 생성 서비스입니다.
 
-![메인화면](/images/ai_profile_photo_main.png)
+## 현재 아키텍처
 
-## 사용기술
+- 프론트엔드: React
+- 인증: Amazon Cognito User Pool 이메일/비밀번호 인증
+- API: API Gateway HTTP API + Lambda
+- 비동기 처리: SQS + Lambda
+- 저장소: S3
+- 데이터: DynamoDB
+- 이미지 생성: Amazon Bedrock `amazon.nova-canvas-v1:0`
+- IaC: Terraform
+- 기본 리전: `ap-northeast-1`
 
-- **프론트엔드**: React + S3 Static Hosting + CloudFront
-- **백엔드**: AWS Lambda (Python 3.12) + API Gateway (HTTP API v2)
-- **인증**: AWS Cognito (Google OAuth)
-- **데이터베이스**: DynamoDB
-- **스토리지**: S3
-- **메시지 큐**: SQS
-- **Image Gen AI**: Google Gemini API
-- **보안**: AWS Secrets Manager
-- **모니터링**: CloudWatch Logs & Metrics
-- **IaC**: AWS SAM (Serverless Application Model)
+## 주요 흐름
 
-## 아키텍처 상세
+1. 사용자가 로그인/회원가입 후 소스 이미지를 업로드합니다.
+2. `POST /upload` 가 Cognito 인증된 사용자에게 S3 presigned POST를 발급합니다.
+3. 프론트엔드가 이미지를 S3에 직접 업로드합니다.
+4. `POST /generate` 가 사용자 소유 파일인지 검증하고 quota를 원자적으로 차감한 뒤 Job을 생성합니다.
+5. SQS가 `image-process` Lambda를 트리거하고 Bedrock Nova Canvas로 이미지 variation을 생성합니다.
+6. 결과 이미지는 S3에 저장되고, `/jobs/*` API는 presigned download URL을 반환합니다.
 
-![아키텍처](/images/ai_profile_photo_architecture.png)
+## 로컬 작업 순서
 
-**주요 플로우:**
+상세 보완 진행 상태와 체크리스트는 `docs/REMEDIATION_PLAN.md` 를 기준으로 관리합니다.
 
-### 1. 파일 업로드 (Direct Upload Pattern)
-1. 사용자가 프론트엔드에서 파일 업로드 요청 (`POST /upload`)
-2. FileTransfer Lambda가 S3 Presigned URL 생성 및 반환
-3. 사용자가 **S3에 직접 업로드** (Lambda를 거치지 않음)
+### 1. 프론트엔드
 
-### 2. 이미지 생성 요청 (Async Processing)
-4. 사용자가 이미지 생성 요청 (`POST /generate`)
-5. ApiManager Lambda가 사용자 권한 및 일일 쿼터 확인 (DynamoDB UsageLog)
-6. ImageJobs 테이블에 Job 생성 (`status=pending`)
-7. SQS Queue에 작업 메시지 발행
-8. Job 상태 업데이트 (`status=queued`)
-9. **SQS 발행 성공 후에만** 사용량 증가 (DynamoDB UsageLog)
+```bash
+cd frontend
+npm ci
+npm run test:ci
+npm run build
+```
 
-### 3. 백그라운드 AI 처리 (SQS Triggered)
-10. SQS 메시지가 ImageProcess Lambda를 트리거
-11. Job 상태 업데이트 (`status=processing`)
-12. S3 Upload Bucket에서 원본 이미지 다운로드
-13. AWS Secrets Manager에서 Gemini API Key 조회
-14. Google Gemini API 호출 (AI 이미지 생성)
-15. 생성된 이미지를 S3 Result Bucket에 업로드
-16. S3 Presigned GET URL 생성 (24시간 유효)
-17. Job 상태 업데이트 (`status=completed`, outputImageUrl 저장)
-18. 사용자 통계 업데이트 (DynamoDB Users - totalImagesGenerated)
+필수 환경 변수:
 
-### 4. 결과 조회 (Polling)
-19. 사용자가 주기적으로 Job 상태 확인 (`GET /jobs/{jobId}`)
-20. ApiManager Lambda가 DynamoDB ImageJobs 조회
-21. `status=completed`일 경우 Presigned URL 반환
-22. 사용자가 **S3에서 직접 다운로드** (Lambda를 거치지 않음)
+- `REACT_APP_API_BASE_URL`
+- `REACT_APP_AWS_REGION`
+- `REACT_APP_COGNITO_USER_POOL_ID`
+- `REACT_APP_COGNITO_CLIENT_ID`
 
-### 5. 에러 처리 (DLQ Pattern)
-- Gemini API 호출 실패 시 SQS 자동 재시도 (최대 3회)
-- 3회 실패 후 Dead Letter Queue로 메시지 이동
-- CloudWatch Alarm 트리거 → 운영자 알림
+`frontend/.env.example` 를 기준으로 `frontend/.env.local` 을 만들면 됩니다.
 
+### 2. Lambda 아티팩트 빌드
 
-## 모니터링
+```bash
+./scripts/build-lambdas.sh
+python -m pytest --collect-only -q tests/unit tests/integration
+python -m pytest -v tests/unit tests/integration --cov=backend --cov-report=term-missing
+```
 
-### CloudWatch Logs
+빌드 결과는 `dist/lambda/*.zip` 에 생성됩니다.
 
-모니터링 방법 추가 작성 필요
+### 3. Terraform bootstrap
 
-### CloudWatch Metrics
+```bash
+terraform -chdir=terraform/bootstrap init
+terraform -chdir=terraform/bootstrap apply
+```
 
-- Lambda 실행 횟수, 에러율, 실행 시간
-- SQS 큐 깊이, 메시지 처리 시간
-- DynamoDB 읽기/쓰기 용량
-- API Gateway 요청 수, 레이턴시
+원격 상태용 S3/DynamoDB를 먼저 만듭니다.
+
+### 4. Terraform env 초기화
+
+예시:
+
+```bash
+cp terraform/envs/dev/backend.hcl.example terraform/envs/dev/backend.hcl
+cp terraform/envs/dev/terraform.tfvars.example terraform/envs/dev/terraform.tfvars
+terraform -chdir=terraform/envs/dev init -backend-config=backend.hcl
+terraform -chdir=terraform/envs/dev plan
+terraform -chdir=terraform/envs/dev apply
+```
+
+prod도 동일하게 `terraform/envs/prod` 를 사용합니다.
+
+GitHub Actions에서는 위 실파일 대신 GitHub Environment 변수로 아래 Terraform 변수들을 주입합니다.
+
+- `TF_VAR_domain_name`
+- `TF_VAR_hosted_zone_id`
+- `TF_VAR_certificate_arn`
+- `TF_VAR_discord_webhook_url` (선택)
+
+### 5. 프론트엔드 배포
+
+```bash
+./scripts/deploy-frontend.sh dev
+```
+
+이 스크립트는 Terraform output에서 API URL, Cognito 설정, S3 버킷, CloudFront 배포 ID를 읽어 프론트엔드를 빌드하고 배포합니다.
+
+## Makefile 명령
+
+```bash
+make lambda-build
+make tf-fmt
+make tf-plan-dev
+make tf-apply-dev
+make deploy-frontend-dev
+```
+
+## 참고
+
+- GitHub Actions 워크플로우는 Terraform/Cognito/Bedrock 배포 경로를 기준으로 정렬되어 있습니다.
+- 배포 smoke test는 인증 없는 `GET /healthz` 를 기준으로 동작합니다.
+- prod 배포는 수동 `workflow_dispatch` 와 GitHub Environment 승인 흐름을 전제로 합니다.

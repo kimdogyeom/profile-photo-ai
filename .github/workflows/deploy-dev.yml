@@ -2,50 +2,117 @@ name: Deploy to Dev
 
 on:
   push:
-    branches: [ develop ]
+    branches: [develop]
   workflow_dispatch:
     inputs:
       skip_tests:
-        description: 'Skip tests'
+        description: Skip tests
         required: false
-        default: 'false'
+        default: "false"
+
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: true
 
 env:
-  AWS_REGION: ap-northeast-2
+  AWS_REGION: ap-northeast-1
   ENVIRONMENT: dev
-  STACK_NAME: profile-photo-ai-dev
+  PYTHON_VERSION: "3.12.3"
+  TERRAFORM_VERSION: "1.13.3"
+  PYTHON_LINT_PATHS: backend/common backend/lambda/api backend/lambda/file_transfer backend/lambda/process tests
+  FRONTEND_API_BASE_URL: https://example.execute-api.ap-northeast-1.amazonaws.com/dev
+  FRONTEND_AWS_REGION: ap-northeast-1
+  FRONTEND_COGNITO_USER_POOL_ID: ap-northeast-1_ciuserpool
+  FRONTEND_COGNITO_CLIENT_ID: abcdefghijklmnopqrstuvwxyz
 
 jobs:
   test:
     name: Run Tests
     runs-on: ubuntu-latest
-    if: github.event.inputs.skip_tests != 'true'
-    
+    if: github.event_name != 'workflow_dispatch' || github.event.inputs.skip_tests != 'true'
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
-      - name: Set up Python 3.12
+
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
-          cache: 'pip'
-      
-      - name: Install dependencies
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Python tooling
         run: |
           python -m pip install --upgrade pip
-          pip install -r backend/requirements.txt
-          pip install pytest pytest-cov
-      
-      - name: Run unit tests
-        run: |
-          echo "🧪 Running unit tests..."
-          python -m pytest tests/test_lambda_direct.py -v --cov=backend/lambda --cov-report=term-missing
+          pip install pytest pytest-cov flake8 boto3
+          pip install -r backend/lambda/api/requirements.txt
+          pip install -r backend/lambda/file_transfer/requirements.txt
+          pip install -r backend/lambda/process/requirements.txt
 
-  deploy-backend:
-    name: Deploy Backend (SAM)
+      - name: Run backend checks
+        run: |
+          python -m compileall backend
+          flake8 ${{ env.PYTHON_LINT_PATHS }} --max-line-length=120 --extend-ignore=E203,E266,E501
+          python -m pytest --collect-only -q tests/unit tests/integration
+          python -m pytest -v tests/unit tests/integration --cov=backend --cov-report=term-missing
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Run frontend tests
+        run: npm run test:ci
+        working-directory: frontend
+        env:
+          REACT_APP_API_BASE_URL: ${{ env.FRONTEND_API_BASE_URL }}
+          REACT_APP_AWS_REGION: ${{ env.FRONTEND_AWS_REGION }}
+          REACT_APP_COGNITO_USER_POOL_ID: ${{ env.FRONTEND_COGNITO_USER_POOL_ID }}
+          REACT_APP_COGNITO_CLIENT_ID: ${{ env.FRONTEND_COGNITO_CLIENT_ID }}
+
+      - name: Build frontend
+        run: npm run build
+        working-directory: frontend
+        env:
+          REACT_APP_API_BASE_URL: ${{ env.FRONTEND_API_BASE_URL }}
+          REACT_APP_AWS_REGION: ${{ env.FRONTEND_AWS_REGION }}
+          REACT_APP_COGNITO_USER_POOL_ID: ${{ env.FRONTEND_COGNITO_USER_POOL_ID }}
+          REACT_APP_COGNITO_CLIENT_ID: ${{ env.FRONTEND_COGNITO_CLIENT_ID }}
+
+  build-lambda-artifacts:
+    name: Build Lambda Artifacts
     needs: test
     if: always() && (needs.test.result == 'success' || needs.test.result == 'skipped')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Build Lambda artifacts
+        run: ./scripts/build-lambdas.sh
+
+      - name: Upload Lambda artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: lambda-artifacts-dev-${{ github.sha }}
+          path: dist/lambda/*.zip
+          if-no-files-found: error
+          retention-days: 3
+
+  deploy-backend:
+    name: Deploy Backend (Terraform)
+    needs: build-lambda-artifacts
     runs-on: ubuntu-latest
     environment:
       name: dev
@@ -53,97 +120,90 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    
+    env:
+      TF_VAR_domain_name: ${{ vars.TF_VAR_DOMAIN_NAME }}
+      TF_VAR_hosted_zone_id: ${{ vars.TF_VAR_HOSTED_ZONE_ID }}
+      TF_VAR_certificate_arn: ${{ vars.TF_VAR_CERTIFICATE_ARN }}
+      TF_VAR_discord_webhook_url: ${{ secrets.DISCORD_WEBHOOK_URL }}
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
-      - name: Set up Python 3.12
+
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
-      
-      - name: Install AWS SAM CLI
-        run: |
-          pip install aws-sam-cli
-      
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Download Lambda artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: lambda-artifacts-dev-${{ github.sha }}
+          path: dist/lambda
+
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::701111311029:role/profile-photo-ai-dev-role
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME_DEV }}
           aws-region: ${{ env.AWS_REGION }}
-      
-      - name: Build SAM application
+
+      - name: Terraform preflight
         run: |
-          echo "📦 Building SAM application..."
-          sam build --parallel
-      
-      - name: Deploy to AWS
-        run: |
-          echo "🚀 Deploying to AWS..."
-          sam deploy \
-            --stack-name ${{ env.STACK_NAME }} \
-            --region ${{ env.AWS_REGION }} \
-            --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
-            --resolve-s3 \
-            --s3-prefix profile-photo-ai-dev \
-            --no-confirm-changeset \
-            --no-fail-on-empty-changeset \
-            --parameter-overrides \
-              Environment=${{ env.ENVIRONMENT }}
-      
-      - name: Get stack outputs
-        id: stack-outputs
-        run: |
-          echo "📋 Fetching stack outputs..."
-          API_URL=$(aws cloudformation describe-stacks \
-            --stack-name ${{ env.STACK_NAME }} \
-            --region ${{ env.AWS_REGION }} \
-            --query 'Stacks[0].Outputs[?OutputKey==`ApiGatewayUrl`].OutputValue' \
-            --output text)
-          
-          echo "api_url=$API_URL" >> $GITHUB_OUTPUT
-          echo "✅ API Gateway URL: $API_URL"
-      
-      - name: Run smoke tests
-        run: |
-          echo "🧪 Running smoke tests..."
-          API_URL="${{ steps.stack-outputs.outputs.api_url }}"
-          
-          # Health check
-          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${API_URL}/health" || echo "000")
-          if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "404" ]; then
-            echo "✅ API is reachable"
-          else
-            echo "⚠️ API health check returned: $HTTP_CODE"
+          if [ -z "${{ secrets.AWS_ROLE_TO_ASSUME_DEV }}" ]; then
+            echo "Missing secret: AWS_ROLE_TO_ASSUME_DEV"
+            exit 1
           fi
-      
-      - name: Comment PR with deployment info
-        if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
+
+          OPTIONAL_DOMAIN_VARS=(TF_VAR_domain_name TF_VAR_hosted_zone_id TF_VAR_certificate_arn)
+          PROVIDED_COUNT=0
+          for name in "${OPTIONAL_DOMAIN_VARS[@]}"; do
+            if [ -n "${!name:-}" ]; then
+              PROVIDED_COUNT=$((PROVIDED_COUNT + 1))
+            fi
+          done
+          if [ "$PROVIDED_COUNT" -gt 0 ] && [ "$PROVIDED_COUNT" -lt "${#OPTIONAL_DOMAIN_VARS[@]}" ]; then
+            echo "Dev deploy requires all domain TF_VAR_* values when any custom-domain value is set"
+            exit 1
+          fi
+
+          ./scripts/tf.sh init dev
+          ./scripts/tf.sh validate dev
+          ./scripts/tf.sh plan dev -out=tfplan
+          terraform -chdir=terraform/envs/dev show -no-color tfplan > terraform/envs/dev/tfplan.txt
+
+      - name: Upload Terraform plan artifacts
+        uses: actions/upload-artifact@v4
         with:
-          script: |
-            const apiUrl = '${{ steps.stack-outputs.outputs.api_url }}';
-            const comment = `## 🚀 Deployment to Dev Successful
-            
-            **Environment:** dev
-            **Stack:** ${{ env.STACK_NAME }}
-            **API Gateway URL:** ${apiUrl}
-            
-            ### Endpoints
-            - POST \`${apiUrl}/upload\`
-            - POST \`${apiUrl}/generate\`
-            - GET \`${apiUrl}/user/me\`
-            
-            Deployed from commit: ${context.sha.substring(0, 7)}
-            `;
-            
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: comment
-            });
+          name: tfplan-dev-${{ github.sha }}-${{ github.run_id }}
+          path: |
+            terraform/envs/dev/tfplan
+            terraform/envs/dev/tfplan.txt
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Deploy Terraform stack
+        run: ./scripts/tf.sh apply dev -auto-approve tfplan
+
+      - name: Run backend smoke test
+        run: |
+          API_URL=$(./scripts/tf.sh output dev -raw api_base_url)
+          if [ -z "$API_URL" ] || [ "$API_URL" = "null" ]; then
+            echo "API_URL not found from Terraform output"
+            exit 1
+          fi
+          HEALTH_RESPONSE="$(curl --fail-with-body --silent --show-error "${API_URL}/healthz")"
+          HEALTH_RESPONSE="$HEALTH_RESPONSE" python - <<'PY'
+import json
+import os
+
+body = json.loads(os.environ["HEALTH_RESPONSE"])
+assert body["status"] == "ok"
+PY
 
   deploy-frontend:
     name: Deploy Frontend
@@ -154,132 +214,73 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '24'
-          cache: 'npm'
+          node-version-file: .nvmrc
+          cache: npm
           cache-dependency-path: frontend/package-lock.json
-      
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::701111311029:role/profile-photo-ai-dev-role
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME_DEV }}
           aws-region: ${{ env.AWS_REGION }}
-      
-      - name: Get backend configuration
-        id: backend-config
-        run: |
-          API_URL=$(aws cloudformation describe-stacks \
-            --stack-name ${{ env.STACK_NAME }} \
-            --region ${{ env.AWS_REGION }} \
-            --query 'Stacks[0].Outputs[?OutputKey==`ApiGatewayUrl`].OutputValue' \
-            --output text)
-          
-          USER_POOL_ID=$(aws cloudformation describe-stacks \
-            --stack-name ${{ env.STACK_NAME }} \
-            --region ${{ env.AWS_REGION }} \
-            --query 'Stacks[0].Outputs[?OutputKey==`CognitoUserPoolId`].OutputValue' \
-            --output text)
-          
-          CLIENT_ID=$(aws cloudformation describe-stacks \
-            --stack-name ${{ env.STACK_NAME }} \
-            --region ${{ env.AWS_REGION }} \
-            --query 'Stacks[0].Outputs[?OutputKey==`CognitoUserPoolClientId`].OutputValue' \
-            --output text)
-          
-          echo "api_url=$API_URL" >> $GITHUB_OUTPUT
-          echo "user_pool_id=$USER_POOL_ID" >> $GITHUB_OUTPUT
-          echo "client_id=$CLIENT_ID" >> $GITHUB_OUTPUT
-      
-      - name: Create .env file
-        run: |
-          cd frontend
-          cat > .env.production << EOF
-          REACT_APP_API_BASE_URL=${{ steps.backend-config.outputs.api_url }}
-          REACT_APP_AWS_REGION=${{ env.AWS_REGION }}
-          REACT_APP_USER_POOL_ID=${{ steps.backend-config.outputs.user_pool_id }}
-          REACT_APP_USER_POOL_CLIENT_ID=${{ steps.backend-config.outputs.client_id }}
-          EOF
-          
-          echo "✅ Created .env.production"
-      
-      - name: Install dependencies
-        run: |
-          cd frontend
-          npm ci
-      
-      - name: Build frontend
-        run: |
-          cd frontend
-          npm run build
-        env:
-          CI: false
-      
-      - name: Deploy to S3
-        run: |
-          echo "📦 Deploying frontend to S3..."
-          aws s3 sync frontend/build/ s3://profile-photo-ai-frontend-dev/ --delete
-          echo "✅ S3 sync completed"
-      
-      - name: Invalidate CloudFront cache
-        run: |
-          echo "🔄 Invalidating CloudFront cache..."
-          DISTRIBUTION_ID=$(aws cloudformation describe-stacks \
-            --stack-name ${{ env.STACK_NAME }} \
-            --region ${{ env.AWS_REGION }} \
-            --query 'Stacks[0].Outputs[?OutputKey==`CloudFrontDistributionId`].OutputValue' \
-            --output text)
-          
-          if [ -n "$DISTRIBUTION_ID" ] && [ "$DISTRIBUTION_ID" != "None" ]; then
-            aws cloudfront create-invalidation \
-              --distribution-id $DISTRIBUTION_ID \
-              --paths "/*"
-            echo "✅ CloudFront cache invalidated"
-          else
-            echo "⚠️ CloudFront distribution not found, skipping cache invalidation"
-          fi
+
+      - name: Deploy frontend using Terraform outputs
+        run: ./scripts/deploy-frontend.sh dev
 
   notify:
     name: Notify Deployment Status
     needs: [deploy-backend, deploy-frontend]
     if: always()
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Send Discord notification
-        if: env.DISCORD_WEBHOOK_URL != ''
+        if: ${{ secrets.DISCORD_WEBHOOK_URL != '' }}
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
-          STATUS="${{ needs.deploy-backend.result }}"
-          COLOR="3066993"  # Blue
-          
-          if [ "$STATUS" = "success" ]; then
-            COLOR="3066993"  # Green
+          BACKEND_STATUS="${{ needs.deploy-backend.result }}"
+          FRONTEND_STATUS="${{ needs.deploy-frontend.result }}"
+
+          COLOR="16776960"
+          EMOJI="⚠️"
+          MESSAGE="Dev deployment status: ${BACKEND_STATUS}/${FRONTEND_STATUS}"
+
+          if [ "$BACKEND_STATUS" = "success" ] && [ "$FRONTEND_STATUS" = "success" ]; then
+            COLOR="3066993"
             EMOJI="✅"
-          elif [ "$STATUS" = "failure" ]; then
-            COLOR="15158332"  # Red
+          elif [ "$BACKEND_STATUS" = "failure" ] || [ "$FRONTEND_STATUS" = "failure" ]; then
+            COLOR="15158332"
             EMOJI="❌"
-          else
-            COLOR="16776960"  # Yellow
-            EMOJI="⚠️"
           fi
-          
+
+          payload=$(cat <<EOF
+          {
+            "embeds": [{
+              "title": "$EMOJI Dev Deployment",
+              "description": "**Status:** $MESSAGE\n**Branch:** ${{ github.ref_name }}\n**Commit:** ${{ github.sha }}",
+              "color": $COLOR,
+              "footer": {
+                "text": "ProfilePhotoAI CI/CD"
+              }
+            }]
+          }
+          EOF
+          )
+
           curl -H "Content-Type: application/json" \
-            -d "{
-              \"embeds\": [{
-                \"title\": \"$EMOJI Deployment to Dev\",
-                \"description\": \"**Status:** $STATUS\n**Branch:** ${{ github.ref_name }}\n**Commit:** ${{ github.sha }}\",
-                \"color\": $COLOR,
-                \"footer\": {
-                  \"text\": \"ProfilePhotoAI CI/CD\"
-                }
-              }]
-            }" \
-            $DISCORD_WEBHOOK_URL || echo "Discord notification skipped"
+            -d "$payload" \
+            "$DISCORD_WEBHOOK_URL" || echo "Discord notification skipped"

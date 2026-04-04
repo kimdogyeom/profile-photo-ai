@@ -6,15 +6,17 @@ import { JobHistoryList } from '../components/JobHistoryList';
 import { Logo } from '../components/Logo';
 import { LogOutIcon } from '../components/Icons';
 import { uploadImage, generateImage } from '../services/api';
+import { getStylePrompt } from '../config/prompts';
 import './GeneratePage.css';
 
 export const GeneratePage = ({ onLogout, userInfo }) => {
   const [selectedFile, setSelectedFile] = useState(null);
-  const [selectedStyle, setSelectedStyle] = useState('professional');
-  const [generatedPrompt, setGeneratedPrompt] = useState('');
+  const [selectedStyle, setSelectedStyle] = useState('formal_interview');
+  const [generatedPrompt, setGeneratedPrompt] = useState(getStylePrompt('formal_interview'));
   const [isLoading, setIsLoading] = useState(false);
   const [pendingJobs, setPendingJobs] = useState([]);
   const [error, setError] = useState(null);
+  const [quotaVersion, setQuotaVersion] = useState(0);
 
   const handleStyleChange = ({ styleId, prompt }) => {
     setSelectedStyle(styleId);
@@ -50,7 +52,7 @@ export const GeneratePage = ({ onLogout, userInfo }) => {
       const inputImageUrl = URL.createObjectURL(selectedFile);
       const newPendingJob = {
         jobId: response.jobId,
-        status: 'pending',
+        status: response.status || 'queued',
         style: selectedStyle,
         inputImage: inputImageUrl,
         outputImageUrl: null,
@@ -59,6 +61,7 @@ export const GeneratePage = ({ onLogout, userInfo }) => {
       };
 
       setPendingJobs(prev => [newPendingJob, ...prev]);
+      setQuotaVersion(prev => prev + 1);
       
       // Keep the selected file for potential retry
       // setSelectedFile(null); // Removed to persist input image
@@ -111,7 +114,7 @@ export const GeneratePage = ({ onLogout, userInfo }) => {
         </div>
 
         <div className="main-section">
-          <UsageQuota />
+          <UsageQuota refreshKey={quotaVersion} />
           
           <ImageUploader 
             onFileSelect={handleFileSelect}

@@ -6,12 +6,17 @@ import './JobHistoryList.css';
 export const JobHistoryList = ({ pendingJobs = [], onJobComplete }) => {
   const [completedJobs, setCompletedJobs] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [nextToken, setNextToken] = useState(null);
+  const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState(null);
 
-  const fetchJobs = useCallback(async () => {
+  const fetchJobs = useCallback(async (token = null, append = false) => {
     try {
-      const response = await getUserJobs(50);
-      setCompletedJobs(response.jobs || []);
+      const response = await getUserJobs(50, token);
+      setCompletedJobs(prev => append ? [...prev, ...(response.jobs || [])] : (response.jobs || []));
+      setNextToken(response.nextToken || null);
+      setHasMore(Boolean(response.hasMore));
       setError(null);
     } catch (err) {
       console.error('Failed to fetch jobs:', err);
@@ -24,6 +29,19 @@ export const JobHistoryList = ({ pendingJobs = [], onJobComplete }) => {
   useEffect(() => {
     fetchJobs();
   }, [fetchJobs]);
+
+  const handleLoadMore = async () => {
+    if (!nextToken || loadingMore) {
+      return;
+    }
+
+    setLoadingMore(true);
+    try {
+      await fetchJobs(nextToken, true);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   useEffect(() => {
     const pollingIntervals = new Map();
@@ -129,7 +147,7 @@ export const JobHistoryList = ({ pendingJobs = [], onJobComplete }) => {
           )}
         </h3>
         {allJobs.length > 0 && (
-          <button onClick={fetchJobs} className="refresh-button" title="새로고침">
+          <button onClick={() => fetchJobs()} className="refresh-button" title="새로고침">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M23 4v6h-6M1 20v-6h6"/>
               <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
@@ -154,6 +172,14 @@ export const JobHistoryList = ({ pendingJobs = [], onJobComplete }) => {
           {allJobs.map(job => (
             <JobCard key={job.jobId} job={job} onRetry={handleRetry} />
           ))}
+        </div>
+      )}
+
+      {hasMore && (
+        <div className="job-history-footer">
+          <button onClick={handleLoadMore} className="retry-fetch-button" disabled={loadingMore}>
+            {loadingMore ? '불러오는 중...' : '이력 더 보기'}
+          </button>
         </div>
       )}
     </div>

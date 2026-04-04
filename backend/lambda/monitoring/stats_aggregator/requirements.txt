@@ -1,0 +1,2 @@
+aws-lambda-powertools==2.43.1
+requests==2.32.3

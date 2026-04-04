@@ -1,1 +1,3 @@
-google-genai
+aws-lambda-powertools==2.43.1
+aws-xray-sdk==2.14.0
+Pillow==10.4.0
