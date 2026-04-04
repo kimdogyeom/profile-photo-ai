@@ -113,8 +113,8 @@
 - [x] `npm run test:ci`
 - [x] `npm run build`
 - [x] GitHub Actions `Verify Actions Preflight`의 `terraform-validate`
-- [ ] GitHub Actions `Verify Actions Preflight`의 `dev-preflight`
-- [ ] GitHub Actions `Verify Actions Preflight`의 `prod-preflight`
+- [x] GitHub Actions `Verify Actions Preflight`의 `dev-preflight`
+- [x] GitHub Actions `Verify Actions Preflight`의 `prod-preflight`
 
 ### 검증 메모
 
@@ -132,6 +132,11 @@
 - `2026-04-05` AWS CLI 확인: 계정 `701111311029` 에 `token.actions.githubusercontent.com` OIDC provider 존재, `ClientIDList=["sts.amazonaws.com"]`
 - `2026-04-05` AWS CLI 확인: `profile-photo-ai-dev-role`, `profile-photo-ai-prod-role` trust policy가 각각 `repo:kimdogyeom/profile-photo-ai:environment:dev|prod` 를 허용
 - `2026-04-05` AWS CLI 확인: CloudTrail 에 최근 `AssumeRoleWithWebIdentity` 이벤트가 전혀 없음. GitHub Actions 실패는 AWS trust 거부보다 `role-to-assume` 입력 누락/오설정 가능성이 높음
+- `2026-04-05` GitHub Environment `dev` / `prod` 에 `AWS_ROLE_TO_ASSUME_*` secret 과 `TF_VAR_*` variable 주입 완료
+- `2026-04-05` Terraform bootstrap apply로 원격 state backend(`profile-photo-ai-terraform-state`, `profile-photo-ai-terraform-locks`) 생성 완료
+- `2026-04-05` AWS IAM managed policy 보완: GitHub Actions role에 Terraform lock table 접근, `ap-northeast-1` 리전 리소스 접근, CloudFront cache policy 조회 권한 추가
+- `2026-04-05` 실제 GitHub Actions PR 검증(`PR #2`, run `23982353354`)에서 `Terraform Validate`, `Dev Preflight Plan`, `Prod Preflight Plan` 모두 성공
+- `2026-04-05` 잔여 이슈: GitHub Actions에서 Node.js 20 deprecation warning 발생. 즉시 blocker는 아니지만 action version 정리는 후속 작업으로 필요
 
 ## 결정 기록
 

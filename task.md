@@ -4,9 +4,9 @@
 
 ## 현재 상태
 
-- 현재 Phase: `Remote Verification Blocked`
+- 현재 Phase: `Remote Verification Done`
 - 기준 문서: `docs/REMEDIATION_PLAN.md`
-- 남은 검증 과제: GitHub Environment/AWS OIDC 설정 보완 후 실제 GitHub Actions deploy preflight 재검증
+- 원격 검증 상태: GitHub Actions `Verify Actions Preflight`에서 Terraform validate, dev preflight, prod preflight 모두 성공
 
 ## 완료된 보완 범위
 
@@ -28,12 +28,13 @@
 ## 남은 TODO
 
 - [x] 실제 GitHub Actions 환경에서 Terraform validate 재검증
-- [ ] GitHub Environment `AWS_ROLE_TO_ASSUME_DEV` / `AWS_ROLE_TO_ASSUME_PROD` 및 IAM OIDC trust 보완
-- [ ] 실제 GitHub Actions 환경에서 dev/prod deploy preflight 재검증
+- [x] GitHub Environment `AWS_ROLE_TO_ASSUME_DEV` / `AWS_ROLE_TO_ASSUME_PROD` 및 IAM OIDC trust 보완
+- [x] 실제 GitHub Actions 환경에서 dev/prod deploy preflight 재검증
+- [ ] GitHub Actions Node.js 20 deprecation warning 대응(action version 정리 또는 Node 24 호환성 확인)
 
 ## 운영 원칙
 
 - 상세 작업 상태 변경은 `docs/REMEDIATION_PLAN.md`의 체크박스를 우선 업데이트
 - `task.md`는 현재 phase와 핵심 TODO만 유지
 - 새 blocker가 생기면 `task.md`에도 한 줄로 반영
-- 현재 blocker: 실제 GitHub Actions에서 dev/prod 모두 OIDC credentials configure 단계 실패. AWS CLI 확인상 OIDC provider/trust policy는 정상이며, GitHub secret의 role ARN 누락 또는 오설정 가능성이 가장 높음
+- 현재 잔여 리스크: `Verify Actions Preflight`는 성공했지만 GitHub Actions의 Node.js 20 deprecation warning은 남아 있음
