@@ -248,10 +248,14 @@ jobs:
 
     steps:
       - name: Send Discord notification
-        if: ${{ secrets.DISCORD_WEBHOOK_URL != '' }}
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
+          if [ -z "${DISCORD_WEBHOOK_URL:-}" ]; then
+            echo "DISCORD_WEBHOOK_URL is not set; skipping notification"
+            exit 0
+          fi
+
           BACKEND_STATUS="${{ needs.deploy-backend.result }}"
           FRONTEND_STATUS="${{ needs.deploy-frontend.result }}"
 
