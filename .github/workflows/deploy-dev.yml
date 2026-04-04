@@ -2,71 +2,117 @@ name: Deploy to Dev
 
 on:
   push:
-    branches: [ develop ]
+    branches: [develop]
   workflow_dispatch:
     inputs:
       skip_tests:
-        description: 'Skip tests'
+        description: Skip tests
         required: false
-        default: 'false'
+        default: "false"
+
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: true
 
 env:
   AWS_REGION: ap-northeast-1
   ENVIRONMENT: dev
+  PYTHON_VERSION: "3.12.3"
+  TERRAFORM_VERSION: "1.13.3"
+  PYTHON_LINT_PATHS: backend/common backend/lambda/api backend/lambda/file_transfer backend/lambda/process tests
+  FRONTEND_API_BASE_URL: https://example.execute-api.ap-northeast-1.amazonaws.com/dev
+  FRONTEND_AWS_REGION: ap-northeast-1
+  FRONTEND_COGNITO_USER_POOL_ID: ap-northeast-1_ciuserpool
+  FRONTEND_COGNITO_CLIENT_ID: abcdefghijklmnopqrstuvwxyz
 
 jobs:
   test:
     name: Run Tests
     runs-on: ubuntu-latest
-    if: github.event.inputs.skip_tests != 'true'
+    if: github.event_name != 'workflow_dispatch' || github.event.inputs.skip_tests != 'true'
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.12
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
-          cache: 'pip'
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install Python tooling
         run: |
           python -m pip install --upgrade pip
-          pip install pytest pytest-cov black flake8
+          pip install pytest pytest-cov flake8 boto3
+          pip install -r backend/lambda/api/requirements.txt
+          pip install -r backend/lambda/file_transfer/requirements.txt
+          pip install -r backend/lambda/process/requirements.txt
 
       - name: Run backend checks
         run: |
           python -m compileall backend
-          black --check backend/lambda
-          flake8 backend/lambda --max-line-length=120 --extend-ignore=E203,E266,E501
-          if [ -d backend/tests ] && find backend/tests -name "test_*.py" | grep -q .; then
-            cd backend
-            python -m pytest -v --cov=lambda --cov-report=term-missing
-          else
-            echo "⚠️ Backend tests not found, skipping"
-          fi
+          flake8 ${{ env.PYTHON_LINT_PATHS }} --max-line-length=120 --extend-ignore=E203,E266,E501
+          python -m pytest --collect-only -q tests/unit tests/integration
+          python -m pytest -v tests/unit tests/integration --cov=backend --cov-report=term-missing
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version-file: .nvmrc
+          cache: npm
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install frontend dependencies
-        run: |
-          cd frontend
-          npm ci
+        run: npm ci
+        working-directory: frontend
+
+      - name: Run frontend tests
+        run: npm run test:ci
+        working-directory: frontend
+        env:
+          REACT_APP_API_BASE_URL: ${{ env.FRONTEND_API_BASE_URL }}
+          REACT_APP_AWS_REGION: ${{ env.FRONTEND_AWS_REGION }}
+          REACT_APP_COGNITO_USER_POOL_ID: ${{ env.FRONTEND_COGNITO_USER_POOL_ID }}
+          REACT_APP_COGNITO_CLIENT_ID: ${{ env.FRONTEND_COGNITO_CLIENT_ID }}
 
       - name: Build frontend
-        run: |
-          cd frontend
-          npm run build
+        run: npm run build
+        working-directory: frontend
+        env:
+          REACT_APP_API_BASE_URL: ${{ env.FRONTEND_API_BASE_URL }}
+          REACT_APP_AWS_REGION: ${{ env.FRONTEND_AWS_REGION }}
+          REACT_APP_COGNITO_USER_POOL_ID: ${{ env.FRONTEND_COGNITO_USER_POOL_ID }}
+          REACT_APP_COGNITO_CLIENT_ID: ${{ env.FRONTEND_COGNITO_CLIENT_ID }}
+
+  build-lambda-artifacts:
+    name: Build Lambda Artifacts
+    needs: test
+    if: always() && (needs.test.result == 'success' || needs.test.result == 'skipped')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Build Lambda artifacts
+        run: ./scripts/build-lambdas.sh
+
+      - name: Upload Lambda artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: lambda-artifacts-dev-${{ github.sha }}
+          path: dist/lambda/*.zip
+          if-no-files-found: error
+          retention-days: 3
 
   deploy-backend:
     name: Deploy Backend (Terraform)
-    needs: test
-    if: always() && (needs.test.result == 'success' || needs.test.result == 'skipped')
+    needs: build-lambda-artifacts
     runs-on: ubuntu-latest
     environment:
       name: dev
@@ -74,16 +120,31 @@ jobs:
     permissions:
       id-token: write
       contents: read
-      actions: write
+    env:
+      TF_VAR_domain_name: ${{ vars.TF_VAR_DOMAIN_NAME }}
+      TF_VAR_hosted_zone_id: ${{ vars.TF_VAR_HOSTED_ZONE_ID }}
+      TF_VAR_certificate_arn: ${{ vars.TF_VAR_CERTIFICATE_ARN }}
+      TF_VAR_discord_webhook_url: ${{ secrets.DISCORD_WEBHOOK_URL }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.12
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Download Lambda artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: lambda-artifacts-dev-${{ github.sha }}
+          path: dist/lambda
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
@@ -91,30 +152,28 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME_DEV }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Build Lambda artifacts
-        run: |
-          ./scripts/build-lambdas.sh
-
       - name: Terraform preflight
         run: |
           if [ -z "${{ secrets.AWS_ROLE_TO_ASSUME_DEV }}" ]; then
-            echo "❌ Missing secret: AWS_ROLE_TO_ASSUME_DEV"
+            echo "Missing secret: AWS_ROLE_TO_ASSUME_DEV"
             exit 1
           fi
 
-          if [ ! -f terraform/envs/dev/main.tf ]; then
-            echo "❌ Missing terraform/envs/dev/main.tf"
+          OPTIONAL_DOMAIN_VARS=(TF_VAR_domain_name TF_VAR_hosted_zone_id TF_VAR_certificate_arn)
+          PROVIDED_COUNT=0
+          for name in "${OPTIONAL_DOMAIN_VARS[@]}"; do
+            if [ -n "${!name:-}" ]; then
+              PROVIDED_COUNT=$((PROVIDED_COUNT + 1))
+            fi
+          done
+          if [ "$PROVIDED_COUNT" -gt 0 ] && [ "$PROVIDED_COUNT" -lt "${#OPTIONAL_DOMAIN_VARS[@]}" ]; then
+            echo "Dev deploy requires all domain TF_VAR_* values when any custom-domain value is set"
             exit 1
           fi
 
           ./scripts/tf.sh init dev
           ./scripts/tf.sh validate dev
           ./scripts/tf.sh plan dev -out=tfplan
-          if [ ! -f terraform/envs/dev/tfplan ]; then
-            echo "❌ Terraform plan file not generated"
-            exit 1
-          fi
-          terraform -chdir=terraform/envs/dev show -no-color tfplan | sed -n '1,160p'
           terraform -chdir=terraform/envs/dev show -no-color tfplan > terraform/envs/dev/tfplan.txt
 
       - name: Upload Terraform plan artifacts
@@ -128,23 +187,23 @@ jobs:
           retention-days: 3
 
       - name: Deploy Terraform stack
-        run: |
-          ./scripts/tf.sh apply dev -auto-approve tfplan
+        run: ./scripts/tf.sh apply dev -auto-approve tfplan
 
       - name: Run backend smoke test
         run: |
           API_URL=$(./scripts/tf.sh output dev -raw api_base_url)
           if [ -z "$API_URL" ] || [ "$API_URL" = "null" ]; then
-            echo "❌ API_URL not found from Terraform output"
+            echo "API_URL not found from Terraform output"
             exit 1
           fi
-          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${API_URL}/health" || echo "000")
-          if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "404" ]; then
-            echo "✅ API is reachable"
-          else
-            echo "⚠️ API health check returned: $HTTP_CODE"
-            exit 1
-          fi
+          HEALTH_RESPONSE="$(curl --fail-with-body --silent --show-error "${API_URL}/healthz")"
+          HEALTH_RESPONSE="$HEALTH_RESPONSE" python - <<'PY'
+import json
+import os
+
+body = json.loads(os.environ["HEALTH_RESPONSE"])
+assert body["status"] == "ok"
+PY
 
   deploy-frontend:
     name: Deploy Frontend
@@ -160,6 +219,18 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -167,8 +238,7 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Deploy frontend using Terraform outputs
-        run: |
-          ./scripts/deploy-frontend.sh dev
+        run: ./scripts/deploy-frontend.sh dev
 
   notify:
     name: Notify Deployment Status

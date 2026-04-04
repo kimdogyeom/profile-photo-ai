@@ -25,11 +25,14 @@ AWS Bedrock Nova Canvas 기반 프로필 사진 생성 서비스입니다.
 
 ## 로컬 작업 순서
 
+상세 보완 진행 상태와 체크리스트는 `docs/REMEDIATION_PLAN.md` 를 기준으로 관리합니다.
+
 ### 1. 프론트엔드
 
 ```bash
 cd frontend
 npm ci
+npm run test:ci
 npm run build
 ```
 
@@ -46,6 +49,8 @@ npm run build
 
 ```bash
 ./scripts/build-lambdas.sh
+python -m pytest --collect-only -q tests/unit tests/integration
+python -m pytest -v tests/unit tests/integration --cov=backend --cov-report=term-missing
 ```
 
 빌드 결과는 `dist/lambda/*.zip` 에 생성됩니다.
@@ -73,6 +78,13 @@ terraform -chdir=terraform/envs/dev apply
 
 prod도 동일하게 `terraform/envs/prod` 를 사용합니다.
 
+GitHub Actions에서는 위 실파일 대신 GitHub Environment 변수로 아래 Terraform 변수들을 주입합니다.
+
+- `TF_VAR_domain_name`
+- `TF_VAR_hosted_zone_id`
+- `TF_VAR_certificate_arn`
+- `TF_VAR_discord_webhook_url` (선택)
+
 ### 5. 프론트엔드 배포
 
 ```bash
@@ -94,4 +106,5 @@ make deploy-frontend-dev
 ## 참고
 
 - GitHub Actions 워크플로우는 Terraform/Cognito/Bedrock 배포 경로를 기준으로 정렬되어 있습니다.
-- 기존 SAM/Google OAuth 기반 경로는 제거되어 더 이상 사용되지 않습니다.
+- 배포 smoke test는 인증 없는 `GET /healthz` 를 기준으로 동작합니다.
+- prod 배포는 수동 `workflow_dispatch` 와 GitHub Environment 승인 흐름을 전제로 합니다.

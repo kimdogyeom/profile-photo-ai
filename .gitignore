@@ -20,6 +20,7 @@ ENV/
 .env
 .env.local
 .env.production
+.env.prod
 .env.development
 .env.*.local
 
@@ -31,6 +32,7 @@ config/prod.json
 frontend/.env
 frontend/.env.local
 frontend/.env.production
+frontend/.env.prod
 frontend/.env.development
 
 # Node
@@ -58,6 +60,8 @@ Thumbs.db
 *.tfstate
 *.tfstate.backup
 .terraform/
+terraform/envs/*/backend.hcl
+terraform/envs/*/terraform.tfvars
 
 # Secrets & Credentials
 secrets.json
@@ -115,6 +119,11 @@ backend/lambda/monitoring/webhook_notifier/README.md
 
 # Documents
 docs/*
+!docs/REMEDIATION_PLAN.md
+!docs/archive/
+docs/archive/*
+!docs/archive/legacy/
+docs/archive/legacy/*
 
 #IAM policies
 iam-policies/*

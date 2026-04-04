@@ -3,24 +3,78 @@ import json
 import os
 import time
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
+from functools import lru_cache
 
 import boto3
 from aws_lambda_powertools import Logger, Tracer
 from aws_lambda_powertools.logging import correlation_paths
 
 logger = Logger()
-tracer = Tracer()
 
-endpoint_url = os.environ.get("AWS_ENDPOINT_URL")
-client_kwargs = {}
-if endpoint_url:
-    client_kwargs["endpoint_url"] = endpoint_url
 
-s3_client = boto3.client("s3", **client_kwargs)
+class _NoOpTracer:
+    @staticmethod
+    def capture_lambda_handler(handler=None, **_kwargs):
+        if handler is None:
+            return lambda inner: inner
+        return handler
 
-UPLOAD_BUCKET = os.environ["UPLOAD_BUCKET"]
-PRESIGNED_URL_EXPIRATION = int(os.environ.get("PRESIGNED_URL_EXPIRATION", "3600"))
+    @staticmethod
+    def capture_method(handler=None, **_kwargs):
+        if handler is None:
+            return lambda inner: inner
+        return handler
+
+
+def _create_tracer():
+    trace_disabled = os.environ.get("POWERTOOLS_TRACE_DISABLED", "").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    if trace_disabled:
+        return _NoOpTracer()
+
+    try:
+        return Tracer()
+    except PermissionError:
+        logger.warning(
+            "Tracing disabled because X-Ray emitter could not be initialized"
+        )
+        return _NoOpTracer()
+
+
+tracer = _create_tracer()
+
+
+def _client_kwargs():
+    kwargs = {}
+    endpoint_url = os.environ.get("AWS_ENDPOINT_URL")
+    if endpoint_url:
+        kwargs["endpoint_url"] = endpoint_url
+    return kwargs
+
+
+@lru_cache(maxsize=1)
+def _get_s3_client():
+    return boto3.client("s3", **_client_kwargs())
+
+
+def _require_env(name: str) -> str:
+    value = os.environ.get(name)
+    if not value:
+        raise RuntimeError(f"Missing required environment variable: {name}")
+    return value
+
+
+def _get_upload_bucket() -> str:
+    return _require_env("UPLOAD_BUCKET")
+
+
+def _get_presigned_url_expiration() -> int:
+    return int(os.environ.get("PRESIGNED_URL_EXPIRATION", "3600"))
+
 
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 ALLOWED_CONTENT_TYPES = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
@@ -49,12 +103,14 @@ def lambda_handler(event, context):
         if validation_error:
             return error_response(400, validation_error)
 
-        file_key = generate_file_key(user_id, get_file_extension(file_name, content_type))
+        file_key = generate_file_key(
+            user_id, get_file_extension(file_name, content_type)
+        )
         presigned_post = generate_presigned_upload_post(
-            bucket=UPLOAD_BUCKET,
+            bucket=_get_upload_bucket(),
             key=file_key,
             content_type=content_type,
-            expiration=PRESIGNED_URL_EXPIRATION,
+            expiration=_get_presigned_url_expiration(),
         )
 
         logger.info(
@@ -75,14 +131,16 @@ def lambda_handler(event, context):
                     "uploadMethod": "POST",
                     "uploadFields": presigned_post["fields"],
                     "fileKey": file_key,
-                    "expiresIn": PRESIGNED_URL_EXPIRATION,
-                    "bucket": UPLOAD_BUCKET,
+                    "expiresIn": _get_presigned_url_expiration(),
+                    "bucket": _get_upload_bucket(),
                     "maxFileSize": MAX_FILE_SIZE,
                 }
             ),
         }
     except Exception as error:
-        logger.exception("Failed to generate presigned upload", extra={"error": str(error)})
+        logger.exception(
+            "Failed to generate presigned upload", extra={"error": str(error)}
+        )
         return error_response(500, "Internal server error")
 
 
@@ -143,12 +201,12 @@ def get_file_extension(file_name, content_type):
 
 def generate_file_key(user_id, file_extension):
     unique_id = uuid.uuid4().hex[:12]
-    timestamp = datetime.utcnow().strftime("%Y%m%d")
+    timestamp = datetime.now(UTC).strftime("%Y%m%d")
     return f"uploads/{user_id}/{timestamp}_{unique_id}{file_extension}"
 
 
 def generate_presigned_upload_post(bucket, key, content_type, expiration):
-    return s3_client.generate_presigned_post(
+    return _get_s3_client().generate_presigned_post(
         Bucket=bucket,
         Key=key,
         Fields={
@@ -176,4 +234,8 @@ def cors_headers():
 
 
 def error_response(status_code, message):
-    return {"statusCode": status_code, "headers": cors_headers(), "body": json.dumps({"error": message})}
+    return {
+        "statusCode": status_code,
+        "headers": cors_headers(),
+        "body": json.dumps({"error": message}),
+    }

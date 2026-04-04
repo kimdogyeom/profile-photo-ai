@@ -4,6 +4,7 @@ import os
 import sys
 import time
 from decimal import Decimal
+from functools import lru_cache
 from typing import Dict, Optional, Tuple
 
 import boto3
@@ -15,24 +16,90 @@ BACKEND_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..
 if BACKEND_ROOT not in sys.path:
     sys.path.append(BACKEND_ROOT)
 
-from common.dynamodb_helper import ImageJobService, UsageService, UserService
+from common.dynamodb_helper import ImageJobService, UsageService, UserService  # noqa: E402
 
 logger = Logger()
-tracer = Tracer()
 metrics = Metrics()
 
-endpoint_url = os.environ.get("AWS_ENDPOINT_URL")
-client_kwargs = {}
-if endpoint_url:
-    client_kwargs["endpoint_url"] = endpoint_url
 
-sqs_client = boto3.client("sqs", **client_kwargs)
-s3_client = boto3.client("s3", **client_kwargs)
+class _NoOpTracer:
+    @staticmethod
+    def capture_lambda_handler(handler=None, **_kwargs):
+        if handler is None:
+            return lambda inner: inner
+        return handler
 
-SQS_QUEUE_URL = os.environ["SQS_QUEUE_URL"]
-UPLOAD_BUCKET = os.environ["UPLOAD_BUCKET"]
-RESULT_BUCKET = os.environ["RESULT_BUCKET"]
-JOB_DOWNLOAD_EXPIRY_SECONDS = int(os.environ.get("JOB_DOWNLOAD_EXPIRY_SECONDS", "86400"))
+    @staticmethod
+    def capture_method(handler=None, **_kwargs):
+        if handler is None:
+            return lambda inner: inner
+        return handler
+
+
+def _create_tracer():
+    trace_disabled = os.environ.get("POWERTOOLS_TRACE_DISABLED", "").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    if trace_disabled:
+        return _NoOpTracer()
+
+    try:
+        return Tracer()
+    except PermissionError:
+        logger.warning(
+            "Tracing disabled because X-Ray emitter could not be initialized"
+        )
+        return _NoOpTracer()
+
+
+tracer = _create_tracer()
+
+
+def _client_kwargs():
+    kwargs = {}
+    endpoint_url = os.environ.get("AWS_ENDPOINT_URL")
+    if endpoint_url:
+        kwargs["endpoint_url"] = endpoint_url
+    return kwargs
+
+
+@lru_cache(maxsize=1)
+def _get_sqs_client():
+    return boto3.client("sqs", **_client_kwargs())
+
+
+@lru_cache(maxsize=1)
+def _get_s3_client():
+    return boto3.client("s3", **_client_kwargs())
+
+
+def _require_env(name: str) -> str:
+    value = os.environ.get(name)
+    if not value:
+        raise RuntimeError(f"Missing required environment variable: {name}")
+    return value
+
+
+def _get_environment() -> str:
+    return os.environ.get("ENVIRONMENT", "unknown")
+
+
+def _get_sqs_queue_url() -> str:
+    return _require_env("SQS_QUEUE_URL")
+
+
+def _get_upload_bucket() -> str:
+    return _require_env("UPLOAD_BUCKET")
+
+
+def _get_result_bucket() -> str:
+    return _require_env("RESULT_BUCKET")
+
+
+def _get_job_download_expiry_seconds() -> int:
+    return int(os.environ.get("JOB_DOWNLOAD_EXPIRY_SECONDS", "86400"))
 
 
 @logger.inject_lambda_context(correlation_id_path=correlation_paths.API_GATEWAY_HTTP)
@@ -43,19 +110,23 @@ def lambda_handler(event, context):
     logger.append_keys(requestId=request_id)
 
     try:
-        http_method = event.get("requestContext", {}).get("http", {}).get("method") or event.get(
-            "requestContext", {}
-        ).get("httpMethod")
+        http_method = event.get("requestContext", {}).get("http", {}).get(
+            "method"
+        ) or event.get("requestContext", {}).get("httpMethod")
         raw_path = event.get("rawPath") or event.get("path", "")
 
         stage = event.get("requestContext", {}).get("stage", "")
         if stage and raw_path.startswith(f"/{stage}/"):
             raw_path = raw_path[len(f"/{stage}") :]
 
-        logger.info("Processing request", extra={"method": http_method, "path": raw_path})
+        logger.info(
+            "Processing request", extra={"method": http_method, "path": raw_path}
+        )
 
         if http_method == "OPTIONS":
             return cors_response(200, {})
+        if http_method == "GET" and raw_path == "/healthz":
+            return handle_healthz()
         if http_method == "POST" and raw_path == "/generate":
             return handle_generate_image(event)
         if http_method == "GET" and raw_path.startswith("/jobs/"):
@@ -96,14 +167,17 @@ def handle_generate_image(event):
         if validation_error:
             return cors_response(400, {"error": validation_error})
 
-        if not verify_s3_file_exists(UPLOAD_BUCKET, file_key):
+        upload_bucket = _get_upload_bucket()
+        if not verify_s3_file_exists(upload_bucket, file_key):
             return cors_response(404, {"error": "Uploaded file not found in S3"})
 
         user = UserService.get_user(user_id)
         if not user:
             user = UserService.create_or_update_user(extract_user_data(event))
 
-        quota_allowed, current_usage, remaining_quota = UsageService.try_consume_quota(user_id)
+        quota_allowed, current_usage, remaining_quota = UsageService.try_consume_quota(
+            user_id
+        )
         if not quota_allowed:
             return cors_response(
                 429,
@@ -115,11 +189,13 @@ def handle_generate_image(event):
             )
 
         quota_reserved = True
-        s3_uri = f"s3://{UPLOAD_BUCKET}/{file_key}"
-        job_id = ImageJobService.create_job(user_id=user_id, style=style, input_url=s3_uri, prompt=prompt)
+        s3_uri = f"s3://{upload_bucket}/{file_key}"
+        job_id = ImageJobService.create_job(
+            user_id=user_id, style=style, input_url=s3_uri, prompt=prompt
+        )
 
-        sqs_response = sqs_client.send_message(
-            QueueUrl=SQS_QUEUE_URL,
+        sqs_response = _get_sqs_client().send_message(
+            QueueUrl=_get_sqs_queue_url(),
             MessageBody=json.dumps(
                 {
                     "jobId": job_id,
@@ -139,7 +215,10 @@ def handle_generate_image(event):
         ImageJobService.update_job_status(
             job_id=job_id,
             status="queued",
-            metadata={"sqsMessageId": sqs_response["MessageId"], "usageCount": current_usage},
+            metadata={
+                "sqsMessageId": sqs_response["MessageId"],
+                "usageCount": current_usage,
+            },
         )
 
         logger.info(
@@ -162,18 +241,39 @@ def handle_generate_image(event):
             },
         )
     except Exception as error:
-        logger.exception("Failed to queue job", extra={"jobId": job_id, "error": str(error)})
+        logger.exception(
+            "Failed to queue job", extra={"jobId": job_id, "error": str(error)}
+        )
 
         if quota_reserved:
             try:
                 UsageService.release_quota(extract_user_id(event))
             except Exception:
-                logger.exception("Failed to release quota after queueing error", extra={"jobId": job_id})
+                logger.exception(
+                    "Failed to release quota after queueing error",
+                    extra={"jobId": job_id},
+                )
 
         if job_id:
-            ImageJobService.update_job_status(job_id=job_id, status="failed", error=str(error))
+            ImageJobService.update_job_status(
+                job_id=job_id, status="failed", error=str(error)
+            )
 
-        return cors_response(500, {"error": "Failed to queue image generation request", "jobId": job_id})
+        return cors_response(
+            500, {"error": "Failed to queue image generation request", "jobId": job_id}
+        )
+
+
+@tracer.capture_method
+def handle_healthz():
+    return cors_response(
+        200,
+        {
+            "status": "ok",
+            "service": "api-manager",
+            "environment": _get_environment(),
+        },
+    )
 
 
 @tracer.capture_method
@@ -234,7 +334,9 @@ def handle_get_user_jobs(event):
     status = query_params.get("status")
     next_token = query_params.get("nextToken")
 
-    result = ImageJobService.get_user_jobs(user_id=user_id, limit=limit, status=status, next_token=next_token)
+    result = ImageJobService.get_user_jobs(
+        user_id=user_id, limit=limit, status=status, next_token=next_token
+    )
     jobs = [hydrate_completed_job(job) for job in result.get("jobs", [])]
     response = {
         "jobs": jobs,
@@ -270,13 +372,17 @@ def handle_download_image(event):
     if not download_url:
         return cors_response(404, {"error": "Output image not found"})
 
-    return cors_response(200, {"downloadUrl": download_url, "expiresIn": 3600, "jobId": job_id})
+    return cors_response(
+        200, {"downloadUrl": download_url, "expiresIn": 3600, "jobId": job_id}
+    )
 
 
 def hydrate_completed_job(job: Dict) -> Dict:
     hydrated = dict(job)
     if hydrated.get("status") == "completed" and hydrated.get("outputImageUrl"):
-        hydrated["outputImageUrl"] = generate_presigned_download_url(hydrated, JOB_DOWNLOAD_EXPIRY_SECONDS)
+        hydrated["outputImageUrl"] = generate_presigned_download_url(
+            hydrated, _get_job_download_expiry_seconds()
+        )
     return hydrated
 
 
@@ -286,14 +392,16 @@ def generate_presigned_download_url(job: Dict, expires_in: int) -> Optional[str]
         return None
 
     try:
-        return s3_client.generate_presigned_url(
+        return _get_s3_client().generate_presigned_url(
             "get_object",
             Params={"Bucket": bucket, "Key": key, "ResponseContentType": "image/png"},
             ExpiresIn=expires_in,
             HttpMethod="GET",
         )
     except ClientError:
-        logger.exception("Failed to create download URL", extra={"bucket": bucket, "key": key})
+        logger.exception(
+            "Failed to create download URL", extra={"bucket": bucket, "key": key}
+        )
         return None
 
 
@@ -302,7 +410,7 @@ def parse_output_location(job: Dict) -> Tuple[Optional[str], Optional[str]]:
     metadata = job.get("metadata") or {}
 
     if isinstance(metadata, dict) and metadata.get("outputKey"):
-        return metadata.get("resultBucket", RESULT_BUCKET), metadata["outputKey"]
+        return metadata.get("resultBucket", _get_result_bucket()), metadata["outputKey"]
 
     if output_url and output_url.startswith("s3://"):
         stripped = output_url.replace("s3://", "", 1)
@@ -310,7 +418,7 @@ def parse_output_location(job: Dict) -> Tuple[Optional[str], Optional[str]]:
         return bucket, key or None
 
     if output_url:
-        return RESULT_BUCKET, output_url
+        return _get_result_bucket(), output_url
 
     return None, None
 
@@ -355,7 +463,9 @@ def parse_request_body(event) -> Optional[Dict]:
         return None
 
 
-def validate_generation_request(user_id: str, file_key: Optional[str], prompt: str) -> Optional[str]:
+def validate_generation_request(
+    user_id: str, file_key: Optional[str], prompt: str
+) -> Optional[str]:
     if not file_key:
         return "fileKey is required"
     if not prompt:
@@ -370,7 +480,7 @@ def validate_generation_request(user_id: str, file_key: Optional[str], prompt: s
 
 def verify_s3_file_exists(bucket: str, key: str) -> bool:
     try:
-        s3_client.head_object(Bucket=bucket, Key=key)
+        _get_s3_client().head_object(Bucket=bucket, Key=key)
         return True
     except ClientError as error:
         if error.response["Error"]["Code"] in {"404", "NoSuchKey", "NotFound"}:

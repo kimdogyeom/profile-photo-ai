@@ -5,4 +5,6 @@ set -euo pipefail
 ENVIRONMENT="${1:-dev}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-terraform -chdir="$ROOT_DIR/terraform/envs/$ENVIRONMENT" destroy "$@"
+shift || true
+
+"$ROOT_DIR/scripts/tf.sh" destroy "$ENVIRONMENT" "$@"

@@ -2,119 +2,142 @@ name: CI Tests
 
 on:
   pull_request:
-    branches: [ main, develop ]
+    branches: [main, develop]
   push:
-    branches: [ develop ]
+    branches: [develop]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12.3"
+  TERRAFORM_VERSION: "1.13.3"
+  PYTHON_LINT_PATHS: backend/common backend/lambda/api backend/lambda/file_transfer backend/lambda/process tests
+  FRONTEND_API_BASE_URL: https://example.execute-api.ap-northeast-1.amazonaws.com/dev
+  FRONTEND_AWS_REGION: ap-northeast-1
+  FRONTEND_COGNITO_USER_POOL_ID: ap-northeast-1_ciuserpool
+  FRONTEND_COGNITO_CLIENT_ID: abcdefghijklmnopqrstuvwxyz
 
 jobs:
   lint-and-test:
     name: Lint & Test
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
-      - name: Set up Python 3.12
+
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
-          cache: 'pip'
-      
+          python-version: ${{ env.PYTHON_VERSION }}
+
       - name: Install Python tooling
         run: |
           python -m pip install --upgrade pip
-          pip install pytest pytest-cov black flake8
-      
-      - name: Lint and type-independent checks
+          pip install pytest pytest-cov flake8 boto3
+          pip install -r backend/lambda/api/requirements.txt
+          pip install -r backend/lambda/file_transfer/requirements.txt
+          pip install -r backend/lambda/process/requirements.txt
+
+      - name: Lint Python code
         run: |
-          echo "🔍 Running Python checks..."
           python -m compileall backend
-          black --check backend/lambda
-          
-          flake8 backend/lambda --max-line-length=120 --extend-ignore=E203,E266,E501
-      
-      - name: Run Python unit tests
+          flake8 ${{ env.PYTHON_LINT_PATHS }} --max-line-length=120 --extend-ignore=E203,E266,E501
+
+      - name: Run Python tests
         run: |
-          echo "🧪 Running unit tests..."
-          if [ -d backend/tests ] && find backend/tests -name "test_*.py" | grep -q .; then
-            cd backend
-            python -m pytest -v --cov=backend/lambda --cov-report=term-missing
-          else
-            echo "⚠️ Backend tests not found, skipping"
-          fi
-      
+          python -m pytest --collect-only -q tests/unit tests/integration
+          python -m pytest -v tests/unit tests/integration --cov=backend --cov-report=term-missing
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version-file: .nvmrc
+          cache: npm
           cache-dependency-path: frontend/package-lock.json
-      
+
       - name: Install frontend dependencies
-        run: |
-          cd frontend
-          npm ci
-      
+        run: npm ci
+        working-directory: frontend
+
+      - name: Run frontend tests
+        run: npm run test:ci
+        working-directory: frontend
+        env:
+          REACT_APP_API_BASE_URL: ${{ env.FRONTEND_API_BASE_URL }}
+          REACT_APP_AWS_REGION: ${{ env.FRONTEND_AWS_REGION }}
+          REACT_APP_COGNITO_USER_POOL_ID: ${{ env.FRONTEND_COGNITO_USER_POOL_ID }}
+          REACT_APP_COGNITO_CLIENT_ID: ${{ env.FRONTEND_COGNITO_CLIENT_ID }}
+
       - name: Build frontend
-        run: |
-          cd frontend
-          npm run build
-      
+        run: npm run build
+        working-directory: frontend
+        env:
+          REACT_APP_API_BASE_URL: ${{ env.FRONTEND_API_BASE_URL }}
+          REACT_APP_AWS_REGION: ${{ env.FRONTEND_AWS_REGION }}
+          REACT_APP_COGNITO_USER_POOL_ID: ${{ env.FRONTEND_COGNITO_USER_POOL_ID }}
+          REACT_APP_COGNITO_CLIENT_ID: ${{ env.FRONTEND_COGNITO_CLIENT_ID }}
+
   security-scan:
     name: Security Scan
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
         with:
-          scan-type: 'fs'
-          scan-ref: '.'
-          format: 'sarif'
-          output: 'trivy-results.sarif'
-          severity: 'CRITICAL,HIGH'
-      
+          scan-type: fs
+          scan-ref: .
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH
+
       - name: Upload Trivy results to GitHub Security
         if: always()
         uses: github/codeql-action/upload-sarif@v3
         with:
-          sarif_file: 'trivy-results.sarif'
-      
+          sarif_file: trivy-results.sarif
+
       - name: Check for secrets in code
         run: |
-          echo "🔒 Checking for exposed secrets..."
+          echo "Checking for exposed secrets..."
           if rg -n --pcre2 "AKIA[0-9A-Z]{16}" --glob '!.git' --glob '!node_modules' --glob '!.terraform' .; then
-            echo "❌ AWS Access Key found in code!"
+            echo "AWS Access Key found in code"
             exit 1
           fi
           if rg -n --pcre2 "AIza[0-9A-Za-z-_]{35}" --glob '!.git' --glob '!node_modules' --glob '!.terraform' .; then
-            echo "❌ Google API Key found in code!"
+            echo "Google API Key found in code"
             exit 1
           fi
-          echo "✅ No secrets found"
 
   validate-terraform:
     name: Validate Terraform
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
       - name: Validate bootstrap configuration
         run: |
           terraform -chdir=terraform/bootstrap init -backend=false
           terraform -chdir=terraform/bootstrap validate
-      
+
       - name: Validate dev environment
         run: |
           terraform -chdir=terraform/envs/dev init -backend=false
           terraform -chdir=terraform/envs/dev validate
-      
+
       - name: Validate prod environment
         run: |
           terraform -chdir=terraform/envs/prod init -backend=false

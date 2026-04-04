@@ -499,6 +499,7 @@ module "api_manager" {
     USAGE_LOG_TABLE              = aws_dynamodb_table.usage_log.name
     IMAGE_JOBS_TABLE             = aws_dynamodb_table.image_jobs.name
     DAILY_LIMIT                  = tostring(var.daily_limit)
+    ENVIRONMENT                  = var.environment
     JOB_DOWNLOAD_EXPIRY_SECONDS  = "86400"
     POWERTOOLS_SERVICE_NAME      = "ProfilePhotoAI"
     POWERTOOLS_METRICS_NAMESPACE = "ProfilePhotoAI/Metrics"
@@ -710,6 +711,12 @@ resource "aws_apigatewayv2_route" "upload" {
   target             = "integrations/${aws_apigatewayv2_integration.file_transfer.id}"
   authorization_type = "JWT"
   authorizer_id      = aws_apigatewayv2_authorizer.jwt.id
+}
+
+resource "aws_apigatewayv2_route" "healthz" {
+  api_id    = aws_apigatewayv2_api.http.id
+  route_key = "GET /healthz"
+  target    = "integrations/${aws_apigatewayv2_integration.api_manager.id}"
 }
 
 resource "aws_apigatewayv2_route" "generate" {

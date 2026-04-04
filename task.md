@@ -1,68 +1,39 @@
-# ProfilePhotoAI Migration Notes
+# ProfilePhotoAI Active Tasks
 
-이 문서는 현재 코드베이스의 재구축 방향과 후속 정리 항목만 남겨둡니다.
+이 파일은 현재 진행 상태만 요약합니다. 상세 체크리스트와 완료 기준은 [`docs/REMEDIATION_PLAN.md`](/home/gyeom/profile-photo-ai/docs/REMEDIATION_PLAN.md)를 기준으로 관리합니다.
 
-## 현재 기준 아키텍처
+## 현재 상태
 
-- 인증: Amazon Cognito User Pool direct auth (email/password)
-- 이미지 생성: AWS Bedrock Nova Canvas (`amazon.nova-canvas-v1:0`)
-- 인프라: Terraform (`terraform/bootstrap`, `terraform/envs/dev`, `terraform/envs/prod`)
-- 비동기 처리: S3 direct upload + SQS + Lambda + DynamoDB
+- 현재 Phase: `Remote Verification Blocked`
+- 기준 문서: `docs/REMEDIATION_PLAN.md`
+- 남은 검증 과제: GitHub Environment/AWS OIDC 설정 보완 후 실제 GitHub Actions deploy preflight 재검증
 
-## 이번 마이그레이션에서 완료한 항목
+## 완료된 보완 범위
 
-- 기존 소셜 로그인 / Hosted UI / 외부 클라우드 의존성 제거
-- 기존 외부 이미지 생성 연동 코드를 Bedrock Nova Canvas variation 호출로 교체
-- 기존 SAM / CloudFormation 기반 배포 경로 제거
-- Terraform 기반 dev/prod 환경 및 bootstrap state 스택 추가
-- 업로드 권한 검증, quota 원자 차감, presigned POST 업로드 검증 강화
-- 작업 이력 pagination 계약을 프론트/백엔드에서 일치시킴
+- GitHub Actions 가드레일 복구
+  - prod 수동 배포 전환
+  - dev/prod concurrency 추가
+  - Python/Node/Terraform 버전 고정
+  - Lambda 아티팩트 빌드/배포 분리
+- 배포 검증 정상화
+  - `GET /healthz` 추가
+  - `/health` 404 허용 제거
+  - GitHub Environment `TF_VAR_*` 주입
+- 테스트 복구
+  - import-time AWS 초기화 제거
+  - `tests/unit`, `tests/integration` pytest 스위트 추가
+  - 프론트 env 검증 및 Jest 테스트 추가
+  - `tests/api-test/api-test.sh` 재작성
 
-## 후속 작업
+## 남은 TODO
 
-- GitHub Actions 재구축
-- Terraform 실계정 apply / destroy 검증
-- E2E 및 백엔드 단위 테스트 재도입
-- 스타일 샘플 이미지 자산 정리
-  - [ ] [세부 작업 2]
-  - [ ] [세부 작업 3]
-- **우선순위**: [High/Medium/Low]
-- **예상 소요 시간**: [시간]
-- **관련 문서**: [파일 경로 또는 링크]
-- **비고**: [추가 메모]
-```
+- [x] 실제 GitHub Actions 환경에서 Terraform validate 재검증
+- [ ] GitHub Environment `AWS_ROLE_TO_ASSUME_DEV` / `AWS_ROLE_TO_ASSUME_PROD` 및 IAM OIDC trust 보완
+- [ ] 실제 GitHub Actions 환경에서 dev/prod deploy preflight 재검증
 
----
+## 운영 원칙
 
-## 📌 참고사항
-
-### 작업 진행 시 체크리스트
-- [ ] 작업 시작 시 상태를 `🚧 IN_PROGRESS`로 변경
-- [ ] 관련 브랜치 생성 (예: `feature/cloudwatch-monitoring`)
-- [ ] 커밋 메시지에 작업 번호 포함 (예: `[Task-1] Add CloudWatch Alarms`)
-- [ ] 작업 완료 시 PR 생성 및 리뷰 요청
-- [ ] PR 머지 후 상태를 `✅ DONE`으로 변경
-- [ ] 완료 날짜 기록
-
-### Git 브랜치 전략
-- `main`: 프로덕션 배포 브랜치
-- `develop`: 개발 통합 브랜치 (선택)
-- `feature/[task-name]`: 기능 개발 브랜치
-- `hotfix/[issue-name]`: 긴급 수정 브랜치
-
-### 커밋 메시지 컨벤션
-```
-[Task-번호] 작업 요약
-
-- 세부 변경 사항 1
-- 세부 변경 사항 2
-
-관련 이슈: #123
-```
-
----
-
----
-
-**마지막 업데이트**: 2025-11-13
-  
+- 상세 작업 상태 변경은 `docs/REMEDIATION_PLAN.md`의 체크박스를 우선 업데이트
+- `task.md`는 현재 phase와 핵심 TODO만 유지
+- 새 blocker가 생기면 `task.md`에도 한 줄로 반영
+- 현재 blocker: 실제 GitHub Actions에서 dev/prod 모두 OIDC credentials configure 단계 실패. AWS CLI 확인상 OIDC provider/trust policy는 정상이며, GitHub secret의 role ARN 누락 또는 오설정 가능성이 가장 높음

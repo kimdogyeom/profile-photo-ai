@@ -5,6 +5,7 @@ import resource
 import sys
 import time
 from datetime import datetime
+from functools import lru_cache
 from io import BytesIO
 from urllib.parse import urlparse
 
@@ -18,42 +19,127 @@ BACKEND_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..
 if BACKEND_ROOT not in sys.path:
     sys.path.append(BACKEND_ROOT)
 
-from common.dynamodb_helper import ImageJobService, UserService
+from common.dynamodb_helper import ImageJobService, UserService  # noqa: E402
 
 logger = Logger()
-tracer = Tracer()
 metrics = Metrics()
 
-endpoint_url = os.environ.get("AWS_ENDPOINT_URL")
-s3_kwargs = {}
-if endpoint_url:
-    s3_kwargs["endpoint_url"] = endpoint_url
 
-s3_client = boto3.client("s3", **s3_kwargs)
-bedrock_client = boto3.client(
-    "bedrock-runtime",
-    region_name=os.environ.get("BEDROCK_REGION", "ap-northeast-1"),
-    config=Config(read_timeout=300, retries={"max_attempts": 3, "mode": "standard"}),
-)
+class _NoOpTracer:
+    @staticmethod
+    def capture_lambda_handler(handler=None, **_kwargs):
+        if handler is None:
+            return lambda inner: inner
+        return handler
 
-RESULT_BUCKET = os.environ["RESULT_BUCKET"]
-BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "amazon.nova-canvas-v1:0")
-BEDROCK_TASK_TYPE = os.environ.get("BEDROCK_IMAGE_TASK_TYPE", "IMAGE_VARIATION")
-BEDROCK_IMAGE_WIDTH = int(os.environ.get("BEDROCK_IMAGE_WIDTH", "1024"))
-BEDROCK_IMAGE_HEIGHT = int(os.environ.get("BEDROCK_IMAGE_HEIGHT", "1024"))
-BEDROCK_IMAGE_QUALITY = os.environ.get("BEDROCK_IMAGE_QUALITY", "standard")
-BEDROCK_CFG_SCALE = float(os.environ.get("BEDROCK_CFG_SCALE", "6.5"))
-BEDROCK_NUMBER_OF_IMAGES = int(os.environ.get("BEDROCK_NUMBER_OF_IMAGES", "1"))
-BEDROCK_SIMILARITY_STRENGTH = float(os.environ.get("BEDROCK_SIMILARITY_STRENGTH", "0.8"))
-NEGATIVE_PROMPT = os.environ.get(
-    "BEDROCK_NEGATIVE_PROMPT",
-    "blurry, distorted face, extra fingers, multiple people, text, watermark, logo, cluttered background, low quality, overexposed, underexposed",
-)
-WEBSOCKET_ENDPOINT = os.environ.get("WEBSOCKET_ENDPOINT")
+    @staticmethod
+    def capture_method(handler=None, **_kwargs):
+        if handler is None:
+            return lambda inner: inner
+        return handler
 
-api_gateway_client = None
-if WEBSOCKET_ENDPOINT:
-    api_gateway_client = boto3.client("apigatewaymanagementapi", endpoint_url=WEBSOCKET_ENDPOINT)
+
+def _create_tracer():
+    trace_disabled = os.environ.get("POWERTOOLS_TRACE_DISABLED", "").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    if trace_disabled:
+        return _NoOpTracer()
+
+    try:
+        return Tracer()
+    except PermissionError:
+        logger.warning(
+            "Tracing disabled because X-Ray emitter could not be initialized"
+        )
+        return _NoOpTracer()
+
+
+tracer = _create_tracer()
+
+
+def _require_env(name: str) -> str:
+    value = os.environ.get(name)
+    if not value:
+        raise RuntimeError(f"Missing required environment variable: {name}")
+    return value
+
+
+def _s3_kwargs():
+    kwargs = {}
+    endpoint_url = os.environ.get("AWS_ENDPOINT_URL")
+    if endpoint_url:
+        kwargs["endpoint_url"] = endpoint_url
+    return kwargs
+
+
+@lru_cache(maxsize=1)
+def _get_s3_client():
+    return boto3.client("s3", **_s3_kwargs())
+
+
+@lru_cache(maxsize=1)
+def _get_bedrock_client():
+    return boto3.client(
+        "bedrock-runtime",
+        region_name=os.environ.get("BEDROCK_REGION", "ap-northeast-1"),
+        config=Config(
+            read_timeout=300, retries={"max_attempts": 3, "mode": "standard"}
+        ),
+    )
+
+
+@lru_cache(maxsize=1)
+def _get_api_gateway_client():
+    websocket_endpoint = os.environ.get("WEBSOCKET_ENDPOINT")
+    if not websocket_endpoint:
+        return None
+    return boto3.client("apigatewaymanagementapi", endpoint_url=websocket_endpoint)
+
+
+def _get_result_bucket() -> str:
+    return _require_env("RESULT_BUCKET")
+
+
+def _get_bedrock_model_id() -> str:
+    return os.environ.get("BEDROCK_MODEL_ID", "amazon.nova-canvas-v1:0")
+
+
+def _get_bedrock_task_type() -> str:
+    return os.environ.get("BEDROCK_IMAGE_TASK_TYPE", "IMAGE_VARIATION")
+
+
+def _get_bedrock_image_width() -> int:
+    return int(os.environ.get("BEDROCK_IMAGE_WIDTH", "1024"))
+
+
+def _get_bedrock_image_height() -> int:
+    return int(os.environ.get("BEDROCK_IMAGE_HEIGHT", "1024"))
+
+
+def _get_bedrock_image_quality() -> str:
+    return os.environ.get("BEDROCK_IMAGE_QUALITY", "standard")
+
+
+def _get_bedrock_cfg_scale() -> float:
+    return float(os.environ.get("BEDROCK_CFG_SCALE", "6.5"))
+
+
+def _get_bedrock_number_of_images() -> int:
+    return int(os.environ.get("BEDROCK_NUMBER_OF_IMAGES", "1"))
+
+
+def _get_bedrock_similarity_strength() -> float:
+    return float(os.environ.get("BEDROCK_SIMILARITY_STRENGTH", "0.8"))
+
+
+def _get_negative_prompt() -> str:
+    return os.environ.get(
+        "BEDROCK_NEGATIVE_PROMPT",
+        "blurry, distorted face, extra fingers, multiple people, text, watermark, logo, cluttered background, low quality, overexposed, underexposed",
+    )
 
 
 @logger.inject_lambda_context
@@ -87,12 +173,18 @@ def lambda_handler(event, context):
             ImageJobService.update_job_status(job_id, "processing")
 
             source_bucket, source_key = parse_s3_uri(s3_uri)
-            input_bytes, download_ms, source_format = download_source_image(source_bucket, source_key)
-            generated_bytes, generation_ms = generate_with_bedrock(input_bytes, source_format, prompt)
+            input_bytes, download_ms, source_format = download_source_image(
+                source_bucket, source_key
+            )
+            generated_bytes, generation_ms = generate_with_bedrock(
+                input_bytes, source_format, prompt
+            )
 
             output_key = f"generated/{user_id}/{job_id}.png"
-            upload_ms = upload_result_image(output_key, generated_bytes, user_id, job_id, style)
-            output_s3_uri = f"s3://{RESULT_BUCKET}/{output_key}"
+            upload_ms = upload_result_image(
+                output_key, generated_bytes, user_id, job_id, style
+            )
+            output_s3_uri = f"s3://{_get_result_bucket()}/{output_key}"
             processing_ms = (time.time() - start_time) * 1000
 
             ImageJobService.update_job_status(
@@ -101,10 +193,10 @@ def lambda_handler(event, context):
                 output_url=output_s3_uri,
                 processing_time=processing_ms,
                 metadata={
-                    "modelId": BEDROCK_MODEL_ID,
-                    "taskType": BEDROCK_TASK_TYPE,
+                    "modelId": _get_bedrock_model_id(),
+                    "taskType": _get_bedrock_task_type(),
                     "outputKey": output_key,
-                    "resultBucket": RESULT_BUCKET,
+                    "resultBucket": _get_result_bucket(),
                     "s3Uri": output_s3_uri,
                     "generationTimeMs": generation_ms,
                     "downloadTimeMs": download_ms,
@@ -126,10 +218,21 @@ def lambda_handler(event, context):
                 },
             )
 
-            metrics.add_metric(name="ImageGenerationSuccess", unit=MetricUnit.Count, value=1)
-            metrics.add_metric(name="TotalProcessingTime", unit=MetricUnit.Milliseconds, value=processing_ms)
-            metrics.add_metric(name="NovaAPIResponseTime", unit=MetricUnit.Milliseconds, value=generation_ms)
+            metrics.add_metric(
+                name="ImageGenerationSuccess", unit=MetricUnit.Count, value=1
+            )
+            metrics.add_metric(
+                name="TotalProcessingTime",
+                unit=MetricUnit.Milliseconds,
+                value=processing_ms,
+            )
+            metrics.add_metric(
+                name="NovaAPIResponseTime",
+                unit=MetricUnit.Milliseconds,
+                value=generation_ms,
+            )
 
+            api_gateway_client = _get_api_gateway_client()
             if connection_id and api_gateway_client:
                 send_websocket_notification(
                     connection_id,
@@ -146,37 +249,67 @@ def lambda_handler(event, context):
         except Exception as error:
             failed_count += 1
             processing_ms = (time.time() - start_time) * 1000
-            metrics.add_metric(name="ImageGenerationFailure", unit=MetricUnit.Count, value=1)
+            metrics.add_metric(
+                name="ImageGenerationFailure", unit=MetricUnit.Count, value=1
+            )
 
             logger.exception(
                 "Image generation failed",
-                extra={"jobId": job_id, "userId": user_id, "processingTimeMs": processing_ms, "error": str(error)},
+                extra={
+                    "jobId": job_id,
+                    "userId": user_id,
+                    "processingTimeMs": processing_ms,
+                    "error": str(error),
+                },
             )
 
             if job_id:
                 try:
                     ImageJobService.update_job_status(
-                        job_id=job_id, status="failed", error=str(error), processing_time=processing_ms
+                        job_id=job_id,
+                        status="failed",
+                        error=str(error),
+                        processing_time=processing_ms,
                     )
                 except Exception:
-                    logger.exception("Failed to persist failed job state", extra={"jobId": job_id})
+                    logger.exception(
+                        "Failed to persist failed job state", extra={"jobId": job_id}
+                    )
 
+            api_gateway_client = _get_api_gateway_client()
             if connection_id and api_gateway_client:
                 send_websocket_notification(
                     connection_id,
-                    {"type": "image_failed", "jobId": job_id, "status": "failed", "error": str(error)},
+                    {
+                        "type": "image_failed",
+                        "jobId": job_id,
+                        "status": "failed",
+                        "error": str(error),
+                    },
                 )
 
     logger.info(
         "Batch processing complete",
-        extra={"totalRecords": len(event["Records"]), "processedCount": processed_count, "failedCount": failed_count},
+        extra={
+            "totalRecords": len(event["Records"]),
+            "processedCount": processed_count,
+            "failedCount": failed_count,
+        },
     )
-    metrics.add_metric(name="BatchProcessed", unit=MetricUnit.Count, value=processed_count)
+    metrics.add_metric(
+        name="BatchProcessed", unit=MetricUnit.Count, value=processed_count
+    )
     metrics.add_metric(name="BatchFailed", unit=MetricUnit.Count, value=failed_count)
 
     return {
         "statusCode": 200,
-        "body": json.dumps({"message": "Processing complete", "processed": processed_count, "failed": failed_count}),
+        "body": json.dumps(
+            {
+                "message": "Processing complete",
+                "processed": processed_count,
+                "failed": failed_count,
+            }
+        ),
     }
 
 
@@ -187,7 +320,7 @@ def parse_s3_uri(s3_uri):
 
 def download_source_image(bucket, key):
     download_start = time.time()
-    response = s3_client.get_object(Bucket=bucket, Key=key)
+    response = _get_s3_client().get_object(Bucket=bucket, Key=key)
     image_bytes = response["Body"].read()
 
     with Image.open(BytesIO(image_bytes)) as image:
@@ -197,7 +330,9 @@ def download_source_image(bucket, key):
 
 
 def generate_with_bedrock(image_bytes, source_format, prompt):
-    image_format = "PNG" if source_format not in {"PNG", "JPEG", "JPG"} else source_format
+    image_format = (
+        "PNG" if source_format not in {"PNG", "JPEG", "JPG"} else source_format
+    )
     canonical_bytes = image_bytes
 
     if image_format == "JPG":
@@ -211,25 +346,25 @@ def generate_with_bedrock(image_bytes, source_format, prompt):
         image_format = "PNG"
 
     request_body = {
-        "taskType": BEDROCK_TASK_TYPE,
+        "taskType": _get_bedrock_task_type(),
         "imageVariationParams": {
             "images": [base64.b64encode(canonical_bytes).decode("utf-8")],
-            "similarityStrength": BEDROCK_SIMILARITY_STRENGTH,
+            "similarityStrength": _get_bedrock_similarity_strength(),
             "text": prompt[:1024],
-            "negativeText": NEGATIVE_PROMPT[:1024],
+            "negativeText": _get_negative_prompt()[:1024],
         },
         "imageGenerationConfig": {
-            "width": BEDROCK_IMAGE_WIDTH,
-            "height": BEDROCK_IMAGE_HEIGHT,
-            "quality": BEDROCK_IMAGE_QUALITY,
-            "cfgScale": BEDROCK_CFG_SCALE,
-            "numberOfImages": BEDROCK_NUMBER_OF_IMAGES,
+            "width": _get_bedrock_image_width(),
+            "height": _get_bedrock_image_height(),
+            "quality": _get_bedrock_image_quality(),
+            "cfgScale": _get_bedrock_cfg_scale(),
+            "numberOfImages": _get_bedrock_number_of_images(),
         },
     }
 
     generation_start = time.time()
-    response = bedrock_client.invoke_model(
-        modelId=BEDROCK_MODEL_ID,
+    response = _get_bedrock_client().invoke_model(
+        modelId=_get_bedrock_model_id(),
         contentType="application/json",
         accept="application/json",
         body=json.dumps(request_body),
@@ -238,7 +373,9 @@ def generate_with_bedrock(image_bytes, source_format, prompt):
     generation_ms = (time.time() - generation_start) * 1000
 
     if generation_ms > 30000:
-        logger.warning("nova_api_slow_response", extra={"responseTimeMs": generation_ms})
+        logger.warning(
+            "nova_api_slow_response", extra={"responseTimeMs": generation_ms}
+        )
 
     if response_body.get("error"):
         logger.error("nova_api_error", extra={"error": response_body["error"]})
@@ -254,8 +391,8 @@ def generate_with_bedrock(image_bytes, source_format, prompt):
 
 def upload_result_image(output_key, generated_bytes, user_id, job_id, style):
     upload_start = time.time()
-    s3_client.put_object(
-        Bucket=RESULT_BUCKET,
+    _get_s3_client().put_object(
+        Bucket=_get_result_bucket(),
         Key=output_key,
         Body=generated_bytes,
         ContentType="image/png",
@@ -265,14 +402,22 @@ def upload_result_image(output_key, generated_bytes, user_id, job_id, style):
             "jobId": job_id,
             "style": style,
             "generatedAt": datetime.utcnow().isoformat(),
-            "modelId": BEDROCK_MODEL_ID,
+            "modelId": _get_bedrock_model_id(),
         },
     )
     return (time.time() - upload_start) * 1000
 
 
 def send_websocket_notification(connection_id, payload):
+    api_gateway_client = _get_api_gateway_client()
+    if not api_gateway_client:
+        return
     try:
-        api_gateway_client.post_to_connection(ConnectionId=connection_id, Data=json.dumps(payload).encode("utf-8"))
+        api_gateway_client.post_to_connection(
+            ConnectionId=connection_id, Data=json.dumps(payload).encode("utf-8")
+        )
     except Exception:
-        logger.exception("Failed to send websocket notification", extra={"connectionId": connection_id})
+        logger.exception(
+            "Failed to send websocket notification",
+            extra={"connectionId": connection_id},
+        )
