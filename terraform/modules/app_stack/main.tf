@@ -626,7 +626,6 @@ module "webhook_notifier" {
   environment_variables = {
     WEBHOOK_URL             = var.discord_webhook_url
     ENVIRONMENT             = var.environment
-    AWS_REGION              = var.aws_region
     POWERTOOLS_SERVICE_NAME = "ProfilePhotoAI"
   }
   tags = local.common_tags
