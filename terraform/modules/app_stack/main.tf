@@ -526,6 +526,18 @@ data "aws_iam_policy_document" "image_process" {
   }
 
   statement {
+    sid    = "ImageProcessQueueConsume"
+    effect = "Allow"
+    actions = [
+      "sqs:ReceiveMessage",
+      "sqs:DeleteMessage",
+      "sqs:ChangeMessageVisibility",
+      "sqs:GetQueueAttributes",
+    ]
+    resources = [aws_sqs_queue.image_process.arn]
+  }
+
+  statement {
     sid     = "UploadBucketRead"
     effect  = "Allow"
     actions = ["s3:GetObject"]
