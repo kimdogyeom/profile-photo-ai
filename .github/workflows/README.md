@@ -45,20 +45,23 @@
 
 ## 필수 GitHub Secrets / Variables
 
-- `AWS_ROLE_TO_ASSUME_DEV`
-- `AWS_ROLE_TO_ASSUME_PROD`
+- `AWS_ROLE_TO_ASSUME_DEV` (GitHub Environment variable)
+- `AWS_ROLE_TO_ASSUME_PROD` (GitHub Environment variable)
 - `DISCORD_WEBHOOK_URL` (옵션)
 - `TF_VAR_DOMAIN_NAME` (GitHub Environment variable)
-- `TF_VAR_HOSTED_ZONE_ID` (GitHub Environment variable)
-- `TF_VAR_CERTIFICATE_ARN` (GitHub Environment variable)
+- `TF_VAR_HOSTED_ZONE_NAME` (GitHub Environment variable)
 - `TF_STATE_BUCKET` (선택: 지정하지 않으면 `profile-photo-ai-terraform-state` 사용)
 - `TF_STATE_KEY` (선택: 기본값 `profile-photo-ai/{env}/terraform.tfstate`)
 - `TF_STATE_REGION` (선택: 기본값 `ap-northeast-1`)
 - `TF_STATE_DYNAMODB_TABLE` (선택: 기본값 `profile-photo-ai-terraform-locks`)
+- `GITHUB_TOKEN` (로컬/CI에서 `terraform/bootstrap apply` 실행 시 필요한 GitHub provider 인증 토큰)
 
 ## 로컬 검증
 
 ```bash
+export GITHUB_TOKEN=ghp_xxx
+make bootstrap-apply
+make tf-bootstrap-dev
 ./scripts/build-lambdas.sh
 venv/bin/flake8 backend/common backend/lambda/api backend/lambda/file_transfer backend/lambda/process tests --max-line-length=120 --extend-ignore=E203,E266,E501
 python -m pytest --collect-only -q tests/unit tests/integration
@@ -73,6 +76,7 @@ terraform -chdir=terraform/envs/prod validate
 ```
 
 ```bash
+./scripts/bootstrap-tf-backend.sh write-backend dev
 ./scripts/tf.sh init dev
 ./scripts/tf.sh validate dev
 ./scripts/tf.sh plan dev -out=tfplan
@@ -88,6 +92,7 @@ terraform -chdir=terraform/envs/prod validate
   - `cognito_user_pool_client_id`
   - `frontend_bucket_name`
   - `frontend_distribution_id`
+- `./scripts/tf.sh init <env>`는 `backend.hcl`이 없을 때 같은 환경의 `backend.hcl.example`을 사용합니다.
 - `frontend/.env.production`/`.env.prod`는 워크플로에서 생성하지 않으며, `deploy-frontend.sh`가 Terraform output을 기준으로 빌드 환경변수를 주입합니다.
 - Frontend build는 필수 `REACT_APP_*` 값이 없으면 `prebuild` 단계에서 실패합니다.
 - 배포 실패 시 `deploy-backend` 또는 `deploy-frontend` 로그의 Terraform 출력 확인이 가장 빠른 추적 지점입니다.

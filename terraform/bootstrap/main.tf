@@ -6,11 +6,19 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.95"
     }
+    github = {
+      source  = "integrations/github"
+      version = "~> 6.0"
+    }
   }
 }
 
 provider "aws" {
   region = var.aws_region
+}
+
+provider "github" {
+  owner = var.github_repo_owner
 }
 
 resource "aws_s3_bucket" "tf_state" {

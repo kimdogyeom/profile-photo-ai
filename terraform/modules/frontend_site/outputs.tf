@@ -11,5 +11,5 @@ output "distribution_domain_name" {
 }
 
 output "frontend_url" {
-  value = var.domain_name != "" ? "https://${var.domain_name}" : "https://${aws_cloudfront_distribution.this.domain_name}"
+  value = local.use_custom_domain ? "https://${var.domain_name}" : "https://${aws_cloudfront_distribution.this.domain_name}"
 }

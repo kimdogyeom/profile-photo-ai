@@ -19,6 +19,10 @@
   - `GET /healthz` 추가
   - `/health` 404 허용 제거
   - GitHub Environment `TF_VAR_*` 주입
+- IaC 재현성 강화
+  - GitHub Actions OIDC/IAM deploy role bootstrap Terraform 코드화
+  - CloudFront용 ACM 인증서와 Route53 validation/alias Terraform 코드화
+  - bootstrap backend 생성 스크립트 및 artifact 검증 강화
 - 테스트 복구
   - import-time AWS 초기화 제거
   - `tests/unit`, `tests/integration` pytest 스위트 추가

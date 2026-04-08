@@ -13,6 +13,7 @@ fi
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TF_DIR="$ROOT_DIR/terraform/envs/$ENVIRONMENT"
 BACKEND_FILE="$TF_DIR/backend.hcl"
+BACKEND_EXAMPLE="$TF_DIR/backend.hcl.example"
 BACKEND_BUCKET="${TF_STATE_BUCKET:-profile-photo-ai-terraform-state}"
 BACKEND_KEY="${TF_STATE_KEY:-profile-photo-ai/${ENVIRONMENT}/terraform.tfstate}"
 BACKEND_REGION="${TF_STATE_REGION:-ap-northeast-1}"
@@ -31,6 +32,12 @@ get_backend_args() {
 
   if [[ -f "$BACKEND_FILE" ]]; then
     args+=("-backend-config=$BACKEND_FILE")
+    return 0
+  fi
+
+  if [[ -f "$BACKEND_EXAMPLE" ]]; then
+    args+=("-backend-config=$BACKEND_EXAMPLE")
+    echo "⚠️ ${BACKEND_FILE} not found. Using ${BACKEND_EXAMPLE} as the backend config." >&2
     return 0
   fi
 

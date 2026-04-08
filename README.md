@@ -14,6 +14,13 @@ ProfilePhotoAI는 사용자가 원본 사진을 업로드하면 취업용 프로
 - 이미지 생성: Amazon Bedrock `amazon.nova-canvas-v1:0`
 - 인프라 관리: Terraform
 
+### 빠른 온보딩
+
+- `make bootstrap-apply`로 Terraform bootstrap 스택을 먼저 적용할 수 있습니다. 이 단계는 AWS state backend, GitHub OIDC/IAM role, GitHub Environment variable까지 함께 관리하므로 `GITHUB_TOKEN`이 필요합니다.
+- `make tf-bootstrap-dev` 또는 `make tf-bootstrap-prod`는 bootstrap output 기준으로 각 환경의 `backend.hcl`을 생성하고 backend를 초기화합니다.
+- `./scripts/tf.sh init <dev|prod>`는 `backend.hcl`이 없으면 각 환경의 `backend.hcl.example`을 자동으로 사용합니다.
+- `./scripts/build-lambdas.sh`는 `dist/lambda/*.zip`을 다시 만들고, `./scripts/deploy-frontend.sh <env>`는 `frontend/build/index.html`이 생성된 뒤에만 S3/CloudFront에 반영합니다.
+
 ## 문제 정의
 
 AI로 프로필 사진을 생성하는 기능 자체보다 어려운 문제는, 이를 비용과 운영을 고려한 웹 서비스로 완성하는 것이었습니다.

@@ -1,7 +1,8 @@
 terraform {
   required_providers {
     aws = {
-      source = "hashicorp/aws"
+      source                = "hashicorp/aws"
+      configuration_aliases = [aws.use1]
     }
   }
 }
@@ -332,13 +333,16 @@ resource "aws_sns_topic" "alarm_notifications" {
 }
 
 module "frontend_site" {
-  source          = "../frontend_site"
-  project_name    = var.project_name
-  environment     = var.environment
-  domain_name     = var.domain_name
-  hosted_zone_id  = var.hosted_zone_id
-  certificate_arn = var.certificate_arn
-  tags            = local.common_tags
+  source = "../frontend_site"
+  providers = {
+    aws      = aws
+    aws.use1 = aws.use1
+  }
+  project_name     = var.project_name
+  environment      = var.environment
+  domain_name      = var.domain_name
+  hosted_zone_name = var.hosted_zone_name
+  tags             = local.common_tags
 }
 
 resource "aws_cognito_user_pool" "this" {
@@ -418,13 +422,13 @@ data "aws_iam_policy_document" "file_transfer" {
 }
 
 module "file_transfer" {
-  source        = "../lambda_function"
-  function_name = local.file_transfer_function_name
-  description   = "Generate authenticated S3 upload forms"
-  handler       = "file_transfer.lambda_handler"
-  source_zip    = var.lambda_artifact_paths["file_transfer"]
+  source               = "../lambda_function"
+  function_name        = local.file_transfer_function_name
+  description          = "Generate authenticated S3 upload forms"
+  handler              = "file_transfer.lambda_handler"
+  source_zip           = var.lambda_artifact_paths["file_transfer"]
   create_inline_policy = true
-  policy_json   = data.aws_iam_policy_document.file_transfer.json
+  policy_json          = data.aws_iam_policy_document.file_transfer.json
   environment_variables = {
     UPLOAD_BUCKET                = aws_s3_bucket.upload.bucket
     PRESIGNED_URL_EXPIRATION     = "3600"
@@ -485,14 +489,14 @@ data "aws_iam_policy_document" "api_manager" {
 }
 
 module "api_manager" {
-  source        = "../lambda_function"
-  function_name = local.api_manager_function_name
-  description   = "Manage authenticated image generation jobs"
-  handler       = "api_manager.lambda_handler"
-  timeout       = 60
-  source_zip    = var.lambda_artifact_paths["api_manager"]
+  source               = "../lambda_function"
+  function_name        = local.api_manager_function_name
+  description          = "Manage authenticated image generation jobs"
+  handler              = "api_manager.lambda_handler"
+  timeout              = 60
+  source_zip           = var.lambda_artifact_paths["api_manager"]
   create_inline_policy = true
-  policy_json   = data.aws_iam_policy_document.api_manager.json
+  policy_json          = data.aws_iam_policy_document.api_manager.json
   environment_variables = {
     SQS_QUEUE_URL                = aws_sqs_queue.image_process.id
     UPLOAD_BUCKET                = aws_s3_bucket.upload.bucket
@@ -566,15 +570,15 @@ data "aws_iam_policy_document" "image_process" {
 }
 
 module "image_process" {
-  source        = "../lambda_function"
-  function_name = local.image_process_function_name
-  description   = "Generate profile images with Bedrock Nova Canvas"
-  handler       = "process.lambda_handler"
-  timeout       = 900
-  memory_size   = 2048
-  source_zip    = var.lambda_artifact_paths["image_process"]
+  source               = "../lambda_function"
+  function_name        = local.image_process_function_name
+  description          = "Generate profile images with Bedrock Nova Canvas"
+  handler              = "process.lambda_handler"
+  timeout              = 900
+  memory_size          = 2048
+  source_zip           = var.lambda_artifact_paths["image_process"]
   create_inline_policy = true
-  policy_json   = data.aws_iam_policy_document.image_process.json
+  policy_json          = data.aws_iam_policy_document.image_process.json
   environment_variables = {
     RESULT_BUCKET                = aws_s3_bucket.result.bucket
     USERS_TABLE                  = aws_dynamodb_table.users.name
@@ -611,14 +615,14 @@ data "aws_iam_policy_document" "stats_aggregator" {
 }
 
 module "stats_aggregator" {
-  source        = "../lambda_function"
-  function_name = local.stats_aggregator_function_name
-  description   = "Aggregate CloudWatch log statistics for the app"
-  handler       = "stats_aggregator.lambda_handler"
-  timeout       = 60
-  source_zip    = var.lambda_artifact_paths["stats_aggregator"]
+  source               = "../lambda_function"
+  function_name        = local.stats_aggregator_function_name
+  description          = "Aggregate CloudWatch log statistics for the app"
+  handler              = "stats_aggregator.lambda_handler"
+  timeout              = 60
+  source_zip           = var.lambda_artifact_paths["stats_aggregator"]
   create_inline_policy = true
-  policy_json   = data.aws_iam_policy_document.stats_aggregator.json
+  policy_json          = data.aws_iam_policy_document.stats_aggregator.json
   environment_variables = {
     ENVIRONMENT             = var.environment
     DISCORD_WEBHOOK_URL     = var.discord_webhook_url

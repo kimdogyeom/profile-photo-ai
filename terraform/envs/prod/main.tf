@@ -15,6 +15,11 @@ provider "aws" {
   region = var.aws_region
 }
 
+provider "aws" {
+  alias  = "use1"
+  region = "us-east-1"
+}
+
 locals {
   lambda_artifact_paths = {
     file_transfer    = abspath("${path.root}/../../../dist/lambda/file-transfer.zip")
@@ -26,15 +31,18 @@ locals {
 }
 
 module "app" {
-  source                = "../../modules/app_stack"
+  source = "../../modules/app_stack"
+  providers = {
+    aws      = aws
+    aws.use1 = aws.use1
+  }
   environment           = "prod"
   aws_region            = var.aws_region
   bedrock_region        = var.bedrock_region
   bedrock_model_id      = var.bedrock_model_id
   daily_limit           = var.daily_limit
   domain_name           = var.domain_name
-  hosted_zone_id        = var.hosted_zone_id
-  certificate_arn       = var.certificate_arn
+  hosted_zone_name      = var.hosted_zone_name
   discord_webhook_url   = var.discord_webhook_url
   cors_allowed_origins  = var.cors_allowed_origins
   lambda_artifact_paths = local.lambda_artifact_paths

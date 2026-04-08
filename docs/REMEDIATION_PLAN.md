@@ -43,7 +43,7 @@
   - 완료 기준: smoke test가 `200`만 성공으로 인정
   - 검증: deploy workflows
 - [x] `R-007` GitHub Environment 기반 `TF_VAR_*` 주입 추가
-  - 완료 기준: workflow가 `TF_VAR_domain_name`, `TF_VAR_hosted_zone_id`, `TF_VAR_certificate_arn`를 사용
+  - 완료 기준: workflow가 `TF_VAR_domain_name`, `TF_VAR_hosted_zone_name`를 사용
   - 검증: workflow YAML
 - [x] `R-008` prod 필수 Terraform 값 누락 시 preflight 실패
   - 완료 기준: 필수 값이 비면 `plan` 전 단계에서 실패
@@ -132,7 +132,7 @@
 - `2026-04-05` AWS CLI 확인: 계정 `701111311029` 에 `token.actions.githubusercontent.com` OIDC provider 존재, `ClientIDList=["sts.amazonaws.com"]`
 - `2026-04-05` AWS CLI 확인: `profile-photo-ai-dev-role`, `profile-photo-ai-prod-role` trust policy가 각각 `repo:kimdogyeom/profile-photo-ai:environment:dev|prod` 를 허용
 - `2026-04-05` AWS CLI 확인: CloudTrail 에 최근 `AssumeRoleWithWebIdentity` 이벤트가 전혀 없음. GitHub Actions 실패는 AWS trust 거부보다 `role-to-assume` 입력 누락/오설정 가능성이 높음
-- `2026-04-05` GitHub Environment `dev` / `prod` 에 `AWS_ROLE_TO_ASSUME_*` secret 과 `TF_VAR_*` variable 주입 완료
+- `2026-04-05` GitHub Environment `dev` / `prod` 에 `AWS_ROLE_TO_ASSUME_*`, `TF_VAR_*` 주입 완료
 - `2026-04-05` Terraform bootstrap apply로 원격 state backend(`profile-photo-ai-terraform-state`, `profile-photo-ai-terraform-locks`) 생성 완료
 - `2026-04-05` AWS IAM managed policy 보완: GitHub Actions role에 Terraform lock table 접근, `ap-northeast-1` 리전 리소스 접근, CloudFront cache policy 조회 권한 추가
 - `2026-04-05` 실제 GitHub Actions PR 검증(`PR #2`, run `23982353354`)에서 `Terraform Validate`, `Dev Preflight Plan`, `Prod Preflight Plan` 모두 성공

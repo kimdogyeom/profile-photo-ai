@@ -32,12 +32,7 @@ variable "domain_name" {
   default = ""
 }
 
-variable "hosted_zone_id" {
-  type    = string
-  default = ""
-}
-
-variable "certificate_arn" {
+variable "hosted_zone_name" {
   type    = string
   default = ""
 }

@@ -6,6 +6,16 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="$ROOT_DIR/dist/lambda"
 COMMON_DIR="$ROOT_DIR/backend/common"
 
+command -v python3 >/dev/null || {
+  echo "python3 is required to build Lambda artifacts"
+  exit 1
+}
+
+command -v zip >/dev/null || {
+  echo "zip is required to build Lambda artifacts"
+  exit 1
+}
+
 rm -rf "$DIST_DIR"
 mkdir -p "$DIST_DIR"
 
@@ -14,8 +24,11 @@ build_function() {
   local source_dir="$2"
   local artifact_name="$3"
   local staging_dir
+  local artifact_path="$DIST_DIR/$artifact_name.zip"
 
   staging_dir="$(mktemp -d)"
+  trap 'rm -rf "$staging_dir"' RETURN
+
   cp -R "$source_dir"/. "$staging_dir"/
   cp -R "$COMMON_DIR" "$staging_dir/common"
 
@@ -31,11 +44,15 @@ build_function() {
 
   (
     cd "$staging_dir"
-    zip -qr "$DIST_DIR/$artifact_name.zip" .
+    LC_ALL=C find . -type f | sort | zip -X -q "$artifact_path" -@
   )
 
-  rm -rf "$staging_dir"
-  echo "Built $name -> dist/lambda/$artifact_name.zip"
+  if [[ ! -f "$artifact_path" ]]; then
+    echo "Failed to create artifact: $artifact_path"
+    exit 1
+  fi
+
+  echo "Built $name -> $artifact_path"
 }
 
 build_function "file-transfer" "$ROOT_DIR/backend/lambda/file_transfer" "file-transfer"

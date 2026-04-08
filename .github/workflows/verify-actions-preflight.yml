@@ -92,8 +92,7 @@ jobs:
       contents: read
     env:
       TF_VAR_domain_name: ${{ vars.TF_VAR_DOMAIN_NAME }}
-      TF_VAR_hosted_zone_id: ${{ vars.TF_VAR_HOSTED_ZONE_ID }}
-      TF_VAR_certificate_arn: ${{ vars.TF_VAR_CERTIFICATE_ARN }}
+      TF_VAR_hosted_zone_name: ${{ vars.TF_VAR_HOSTED_ZONE_NAME }}
       TF_VAR_discord_webhook_url: ${{ secrets.DISCORD_WEBHOOK_URL }}
 
     steps:
@@ -114,17 +113,17 @@ jobs:
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME_DEV }}
+          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME_DEV }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Dev preflight
         run: |
-          if [ -z "${{ secrets.AWS_ROLE_TO_ASSUME_DEV }}" ]; then
-            echo "Missing secret: AWS_ROLE_TO_ASSUME_DEV"
+          if [ -z "${{ vars.AWS_ROLE_TO_ASSUME_DEV }}" ]; then
+            echo "Missing variable: AWS_ROLE_TO_ASSUME_DEV"
             exit 1
           fi
 
-          OPTIONAL_DOMAIN_VARS=(TF_VAR_domain_name TF_VAR_hosted_zone_id TF_VAR_certificate_arn)
+          OPTIONAL_DOMAIN_VARS=(TF_VAR_domain_name TF_VAR_hosted_zone_name)
           PROVIDED_COUNT=0
           for name in "${OPTIONAL_DOMAIN_VARS[@]}"; do
             if [ -n "${!name:-}" ]; then
@@ -165,8 +164,7 @@ jobs:
       contents: read
     env:
       TF_VAR_domain_name: ${{ vars.TF_VAR_DOMAIN_NAME }}
-      TF_VAR_hosted_zone_id: ${{ vars.TF_VAR_HOSTED_ZONE_ID }}
-      TF_VAR_certificate_arn: ${{ vars.TF_VAR_CERTIFICATE_ARN }}
+      TF_VAR_hosted_zone_name: ${{ vars.TF_VAR_HOSTED_ZONE_NAME }}
       TF_VAR_discord_webhook_url: ${{ secrets.DISCORD_WEBHOOK_URL }}
 
     steps:
@@ -187,17 +185,17 @@ jobs:
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME_PROD }}
+          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME_PROD }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Prod preflight
         run: |
-          if [ -z "${{ secrets.AWS_ROLE_TO_ASSUME_PROD }}" ]; then
-            echo "Missing secret: AWS_ROLE_TO_ASSUME_PROD"
+          if [ -z "${{ vars.AWS_ROLE_TO_ASSUME_PROD }}" ]; then
+            echo "Missing variable: AWS_ROLE_TO_ASSUME_PROD"
             exit 1
           fi
 
-          REQUIRED_TF_VARS=(TF_VAR_domain_name TF_VAR_hosted_zone_id TF_VAR_certificate_arn)
+          REQUIRED_TF_VARS=(TF_VAR_domain_name TF_VAR_hosted_zone_name)
           for name in "${REQUIRED_TF_VARS[@]}"; do
             if [ -z "${!name:-}" ]; then
               echo "Missing required prod Terraform variable: $name"
