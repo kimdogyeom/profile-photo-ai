@@ -8,9 +8,10 @@ terraform {
 }
 
 locals {
-  bucket_name       = "${var.project_name}-frontend-${var.environment}"
-  hosted_zone_name  = trimsuffix(var.hosted_zone_name, ".")
-  use_custom_domain = var.domain_name != "" && var.hosted_zone_name != ""
+  bucket_name        = "${var.project_name}-frontend-${var.environment}"
+  hosted_zone_name   = trimsuffix(var.hosted_zone_name, ".")
+  use_custom_domain  = var.domain_name != "" && var.hosted_zone_name != ""
+  create_certificate = local.use_custom_domain && var.acm_certificate_arn == ""
 }
 
 data "aws_route53_zone" "this" {
@@ -26,7 +27,7 @@ resource "aws_s3_bucket" "this" {
 }
 
 resource "aws_acm_certificate" "this" {
-  count    = local.use_custom_domain ? 1 : 0
+  count    = local.create_certificate ? 1 : 0
   provider = aws.use1
 
   domain_name       = var.domain_name
@@ -40,7 +41,7 @@ resource "aws_acm_certificate" "this" {
 }
 
 resource "aws_route53_record" "certificate_validation" {
-  count   = local.use_custom_domain ? 1 : 0
+  count   = local.create_certificate ? 1 : 0
   zone_id = data.aws_route53_zone.this[0].zone_id
   name    = tolist(aws_acm_certificate.this[0].domain_validation_options)[0].resource_record_name
   type    = tolist(aws_acm_certificate.this[0].domain_validation_options)[0].resource_record_type
@@ -51,7 +52,7 @@ resource "aws_route53_record" "certificate_validation" {
 }
 
 resource "aws_acm_certificate_validation" "this" {
-  count    = local.use_custom_domain ? 1 : 0
+  count    = local.create_certificate ? 1 : 0
   provider = aws.use1
 
   certificate_arn         = aws_acm_certificate.this[0].arn
@@ -142,7 +143,7 @@ resource "aws_cloudfront_distribution" "this" {
 
   viewer_certificate {
     cloudfront_default_certificate = local.use_custom_domain ? false : true
-    acm_certificate_arn            = local.use_custom_domain ? aws_acm_certificate_validation.this[0].certificate_arn : null
+    acm_certificate_arn            = local.use_custom_domain ? (local.create_certificate ? aws_acm_certificate_validation.this[0].certificate_arn : var.acm_certificate_arn) : null
     ssl_support_method             = local.use_custom_domain ? "sni-only" : null
     minimum_protocol_version       = local.use_custom_domain ? "TLSv1.2_2021" : "TLSv1"
   }
@@ -181,6 +182,19 @@ resource "aws_route53_record" "alias" {
   zone_id = data.aws_route53_zone.this[0].zone_id
   name    = var.domain_name
   type    = "A"
+
+  alias {
+    name                   = aws_cloudfront_distribution.this.domain_name
+    zone_id                = aws_cloudfront_distribution.this.hosted_zone_id
+    evaluate_target_health = false
+  }
+}
+
+resource "aws_route53_record" "alias_ipv6" {
+  count   = local.use_custom_domain ? 1 : 0
+  zone_id = data.aws_route53_zone.this[0].zone_id
+  name    = var.domain_name
+  type    = "AAAA"
 
   alias {
     name                   = aws_cloudfront_distribution.this.domain_name

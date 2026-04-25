@@ -26,6 +26,11 @@ variable "hosted_zone_name" {
   }
 }
 
+variable "acm_certificate_arn" {
+  type    = string
+  default = ""
+}
+
 variable "tags" {
   type    = map(string)
   default = {}

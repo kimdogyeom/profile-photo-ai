@@ -1,7 +1,7 @@
 aws_region           = "ap-northeast-1"
 bedrock_region       = "ap-northeast-1"
 daily_limit          = 15
-cors_allowed_origins = ["http://localhost:3000"]
-domain_name          = ""
-hosted_zone_name     = ""
+cors_allowed_origins = ["https://dev.profile-ai.aigyeom.com", "http://localhost:3000"]
+domain_name          = "dev.profile-ai.aigyeom.com"
+hosted_zone_name     = "aigyeom.com"
 discord_webhook_url  = ""

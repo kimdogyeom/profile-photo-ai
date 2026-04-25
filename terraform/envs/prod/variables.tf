@@ -28,6 +28,11 @@ variable "hosted_zone_name" {
   default = ""
 }
 
+variable "acm_certificate_arn" {
+  type    = string
+  default = ""
+}
+
 variable "discord_webhook_url" {
   type      = string
   default   = ""

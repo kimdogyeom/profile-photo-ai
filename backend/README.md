@@ -28,7 +28,7 @@
 ## 중요 변경점
 
 - 기존 외부 이미지 모델 의존성 제거, Bedrock Nova Canvas로 통합
-- 기존 소셜 로그인 / Hosted UI 흐름 제거, Cognito 직접 인증만 유지
+- 프론트엔드 인증은 Cognito Hosted UI + Authorization Code + PKCE 기준으로 정리
 - quota 차감은 DynamoDB 조건식 기반 원자 업데이트로 변경
 - `fileKey` 는 반드시 현재 사용자 prefix(`uploads/{userId}/`) 와 일치해야 함
 - 결과 다운로드 URL은 API 조회 시점에 presigned URL로 생성됨

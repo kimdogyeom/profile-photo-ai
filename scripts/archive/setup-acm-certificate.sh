@@ -18,13 +18,13 @@ if [ $# -lt 2 ] || [ $# -gt 3 ]; then
     echo ""
     echo "Examples:"
     echo "  # 단일 도메인"
-    echo "  $0 aigyeom.com Z04120473BUOE0AZ1WEE1"
+    echo "  $0 profile-ai.aigyeom.com Z04120473BUOE0AZ1WEE1"
     echo ""
     echo "  # Wildcard 도메인 (추천 - 모든 서브도메인 지원)"
-    echo "  $0 '*.aigyeom.com' Z04120473BUOE0AZ1WEE1 aigyeom.com"
+    echo "  $0 '*.profile-ai.aigyeom.com' Z04120473BUOE0AZ1WEE1 profile-ai.aigyeom.com"
     echo ""
     echo "  # 여러 도메인 (SAN - Subject Alternative Names)"
-    echo "  $0 aigyeom.com Z04120473BUOE0AZ1WEE1 'dev.aigyeom.com,www.aigyeom.com'"
+    echo "  $0 profile-ai.aigyeom.com Z04120473BUOE0AZ1WEE1 'dev.profile-ai.aigyeom.com,www.profile-ai.aigyeom.com'"
     exit 1
 fi
 

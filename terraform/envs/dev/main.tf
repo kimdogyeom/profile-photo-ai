@@ -72,6 +72,10 @@ output "cognito_user_pool_client_id" {
   value = module.app.cognito_user_pool_client_id
 }
 
+output "cognito_domain" {
+  value = module.app.cognito_domain
+}
+
 output "aws_region" {
   value = var.aws_region
 }

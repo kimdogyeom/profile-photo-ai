@@ -61,15 +61,15 @@ variable "github_actions_prod_role_name" {
 variable "github_environment_domain_names" {
   type = map(string)
   default = {
-    dev  = ""
-    prod = ""
+    dev  = "dev.profile-ai.aigyeom.com"
+    prod = "profile-ai.aigyeom.com"
   }
 }
 
 variable "github_environment_hosted_zone_names" {
   type = map(string)
   default = {
-    dev  = ""
-    prod = ""
+    dev  = "aigyeom.com"
+    prod = "aigyeom.com"
   }
 }

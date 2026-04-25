@@ -41,7 +41,7 @@ apiClient.interceptors.response.use(
   async (error) => {
     if (error.response?.status === 401) {
       console.error('Unauthorized - token may be invalid or expired');
-      logout();
+      logout({ redirect: false });
       window.location.href = '/';
     }
     return Promise.reject(error);

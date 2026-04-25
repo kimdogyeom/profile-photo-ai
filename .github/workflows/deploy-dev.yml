@@ -24,6 +24,9 @@ env:
   FRONTEND_AWS_REGION: ap-northeast-1
   FRONTEND_COGNITO_USER_POOL_ID: ap-northeast-1_ciuserpool
   FRONTEND_COGNITO_CLIENT_ID: abcdefghijklmnopqrstuvwxyz
+  FRONTEND_COGNITO_DOMAIN: example.auth.ap-northeast-1.amazoncognito.com
+  FRONTEND_REDIRECT_URI: https://dev.profile-ai.aigyeom.com/callback
+  FRONTEND_LOGOUT_URI: https://dev.profile-ai.aigyeom.com
 
 jobs:
   test:
@@ -74,6 +77,9 @@ jobs:
           REACT_APP_AWS_REGION: ${{ env.FRONTEND_AWS_REGION }}
           REACT_APP_COGNITO_USER_POOL_ID: ${{ env.FRONTEND_COGNITO_USER_POOL_ID }}
           REACT_APP_COGNITO_CLIENT_ID: ${{ env.FRONTEND_COGNITO_CLIENT_ID }}
+          REACT_APP_COGNITO_DOMAIN: ${{ env.FRONTEND_COGNITO_DOMAIN }}
+          REACT_APP_REDIRECT_URI: ${{ env.FRONTEND_REDIRECT_URI }}
+          REACT_APP_LOGOUT_URI: ${{ env.FRONTEND_LOGOUT_URI }}
 
       - name: Build frontend
         run: npm run build
@@ -83,6 +89,9 @@ jobs:
           REACT_APP_AWS_REGION: ${{ env.FRONTEND_AWS_REGION }}
           REACT_APP_COGNITO_USER_POOL_ID: ${{ env.FRONTEND_COGNITO_USER_POOL_ID }}
           REACT_APP_COGNITO_CLIENT_ID: ${{ env.FRONTEND_COGNITO_CLIENT_ID }}
+          REACT_APP_COGNITO_DOMAIN: ${{ env.FRONTEND_COGNITO_DOMAIN }}
+          REACT_APP_REDIRECT_URI: ${{ env.FRONTEND_REDIRECT_URI }}
+          REACT_APP_LOGOUT_URI: ${{ env.FRONTEND_LOGOUT_URI }}
 
   build-lambda-artifacts:
     name: Build Lambda Artifacts
@@ -116,7 +125,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: dev
-      url: https://dev.aigyeom.com
+      url: https://dev.profile-ai.aigyeom.com
     permissions:
       id-token: write
       contents: read

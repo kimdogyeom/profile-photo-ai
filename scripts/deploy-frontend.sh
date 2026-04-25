@@ -35,6 +35,8 @@ API_BASE_URL="$(get_output api_base_url)"
 AWS_REGION="$(get_output aws_region)"
 USER_POOL_ID="$(get_output cognito_user_pool_id)"
 CLIENT_ID="$(get_output cognito_user_pool_client_id)"
+COGNITO_DOMAIN="$(get_output cognito_domain)"
+FRONTEND_URL="$(get_output frontend_url)"
 FRONTEND_BUCKET="$(get_output frontend_bucket_name)"
 DIST_ID="$(get_output frontend_distribution_id)"
 
@@ -44,6 +46,9 @@ REACT_APP_API_BASE_URL="$API_BASE_URL" \
 REACT_APP_AWS_REGION="$AWS_REGION" \
 REACT_APP_COGNITO_USER_POOL_ID="$USER_POOL_ID" \
 REACT_APP_COGNITO_CLIENT_ID="$CLIENT_ID" \
+REACT_APP_COGNITO_DOMAIN="$COGNITO_DOMAIN" \
+REACT_APP_REDIRECT_URI="${FRONTEND_URL}/callback" \
+REACT_APP_LOGOUT_URI="$FRONTEND_URL" \
   npm run build
 
 if [[ ! -f "$FRONTEND_BUILD_DIR/index.html" ]]; then

@@ -31,8 +31,9 @@ locals {
   stats_aggregator_function_name = "${var.project_name}-stats-aggregator-${var.environment}"
   webhook_notifier_function_name = "${var.project_name}-webhook-notifier-${var.environment}"
 
-  alarm_topic_name = "${var.project_name}-alarm-notifications-${var.environment}"
-  metric_namespace = "ProfilePhotoAI/${var.environment}"
+  alarm_topic_name      = "${var.project_name}-alarm-notifications-${var.environment}"
+  metric_namespace      = "ProfilePhotoAI/${var.environment}"
+  cognito_domain_prefix = "${var.project_name}-${var.environment}-aigyeom"
 }
 
 resource "aws_s3_bucket" "upload" {
@@ -338,11 +339,24 @@ module "frontend_site" {
     aws      = aws
     aws.use1 = aws.use1
   }
-  project_name     = var.project_name
-  environment      = var.environment
-  domain_name      = var.domain_name
-  hosted_zone_name = var.hosted_zone_name
-  tags             = local.common_tags
+  project_name        = var.project_name
+  environment         = var.environment
+  domain_name         = var.domain_name
+  hosted_zone_name    = var.hosted_zone_name
+  acm_certificate_arn = var.acm_certificate_arn
+  tags                = local.common_tags
+}
+
+locals {
+  frontend_base_url = module.frontend_site.frontend_url
+  cognito_callback_urls = distinct(concat(
+    ["${local.frontend_base_url}/callback"],
+    var.environment == "dev" ? ["http://localhost:3000/callback"] : []
+  ))
+  cognito_logout_urls = distinct(concat(
+    [local.frontend_base_url],
+    var.environment == "dev" ? ["http://localhost:3000"] : []
+  ))
 }
 
 resource "aws_cognito_user_pool" "this" {
@@ -393,21 +407,31 @@ resource "aws_cognito_user_pool" "this" {
 }
 
 resource "aws_cognito_user_pool_client" "this" {
-  name                          = "${var.project_name}-client-${var.environment}"
-  user_pool_id                  = aws_cognito_user_pool.this.id
-  generate_secret               = false
-  prevent_user_existence_errors = "ENABLED"
-  explicit_auth_flows           = ["ALLOW_USER_PASSWORD_AUTH", "ALLOW_USER_SRP_AUTH", "ALLOW_REFRESH_TOKEN_AUTH"]
-  supported_identity_providers  = ["COGNITO"]
-  refresh_token_validity        = 30
-  access_token_validity         = 1
-  id_token_validity             = 1
+  name                                 = "${var.project_name}-client-${var.environment}"
+  user_pool_id                         = aws_cognito_user_pool.this.id
+  generate_secret                      = false
+  prevent_user_existence_errors        = "ENABLED"
+  explicit_auth_flows                  = ["ALLOW_USER_PASSWORD_AUTH", "ALLOW_USER_SRP_AUTH", "ALLOW_REFRESH_TOKEN_AUTH"]
+  supported_identity_providers         = ["COGNITO"]
+  allowed_oauth_flows_user_pool_client = true
+  allowed_oauth_flows                  = ["code"]
+  allowed_oauth_scopes                 = ["openid", "email", "profile"]
+  callback_urls                        = local.cognito_callback_urls
+  logout_urls                          = local.cognito_logout_urls
+  refresh_token_validity               = 30
+  access_token_validity                = 1
+  id_token_validity                    = 1
 
   token_validity_units {
     refresh_token = "days"
     access_token  = "hours"
     id_token      = "hours"
   }
+}
+
+resource "aws_cognito_user_pool_domain" "this" {
+  domain       = local.cognito_domain_prefix
+  user_pool_id = aws_cognito_user_pool.this.id
 }
 
 data "aws_iam_policy_document" "file_transfer" {
@@ -801,30 +825,6 @@ resource "aws_lambda_permission" "allow_http_api_api_manager" {
   source_arn    = "${aws_apigatewayv2_api.http.execution_arn}/*/*"
 }
 
-resource "aws_cloudwatch_log_metric_filter" "nova_api_error" {
-  name           = "${var.project_name}-nova-api-error-${var.environment}"
-  log_group_name = module.image_process.log_group_name
-  pattern        = "{ $.message = \"nova_api_error\" }"
-
-  metric_transformation {
-    name      = "NovaApiErrors"
-    namespace = local.metric_namespace
-    value     = "1"
-  }
-}
-
-resource "aws_cloudwatch_log_metric_filter" "nova_api_slow_response" {
-  name           = "${var.project_name}-nova-api-slow-${var.environment}"
-  log_group_name = module.image_process.log_group_name
-  pattern        = "{ $.message = \"nova_api_slow_response\" }"
-
-  metric_transformation {
-    name      = "NovaApiSlowResponses"
-    namespace = local.metric_namespace
-    value     = "1"
-  }
-}
-
 resource "aws_cloudwatch_metric_alarm" "image_process_errors" {
   alarm_name          = "${var.project_name}-ImageProcessErrors-${var.environment}"
   alarm_description   = "Image process Lambda has invocation errors"
@@ -840,42 +840,6 @@ resource "aws_cloudwatch_metric_alarm" "image_process_errors" {
 
   dimensions = {
     FunctionName = module.image_process.function_name
-  }
-}
-
-resource "aws_cloudwatch_metric_alarm" "api_manager_errors" {
-  alarm_name          = "${var.project_name}-ApiManagerErrors-${var.environment}"
-  alarm_description   = "API manager Lambda has invocation errors"
-  comparison_operator = "GreaterThanThreshold"
-  evaluation_periods  = 1
-  metric_name         = "Errors"
-  namespace           = "AWS/Lambda"
-  period              = 300
-  statistic           = "Sum"
-  threshold           = 0
-  alarm_actions       = [aws_sns_topic.alarm_notifications.arn]
-  treat_missing_data  = "notBreaching"
-
-  dimensions = {
-    FunctionName = module.api_manager.function_name
-  }
-}
-
-resource "aws_cloudwatch_metric_alarm" "file_transfer_errors" {
-  alarm_name          = "${var.project_name}-FileTransferErrors-${var.environment}"
-  alarm_description   = "File transfer Lambda has invocation errors"
-  comparison_operator = "GreaterThanThreshold"
-  evaluation_periods  = 1
-  metric_name         = "Errors"
-  namespace           = "AWS/Lambda"
-  period              = 300
-  statistic           = "Sum"
-  threshold           = 0
-  alarm_actions       = [aws_sns_topic.alarm_notifications.arn]
-  treat_missing_data  = "notBreaching"
-
-  dimensions = {
-    FunctionName = module.file_transfer.function_name
   }
 }
 
@@ -895,34 +859,6 @@ resource "aws_cloudwatch_metric_alarm" "dlq_messages" {
   dimensions = {
     QueueName = aws_sqs_queue.image_process_dlq.name
   }
-}
-
-resource "aws_cloudwatch_metric_alarm" "nova_api_errors" {
-  alarm_name          = "${var.project_name}-NovaApiErrors-${var.environment}"
-  alarm_description   = "Nova API returned model-level errors"
-  comparison_operator = "GreaterThanOrEqualToThreshold"
-  evaluation_periods  = 1
-  metric_name         = aws_cloudwatch_log_metric_filter.nova_api_error.metric_transformation[0].name
-  namespace           = local.metric_namespace
-  period              = 300
-  statistic           = "Sum"
-  threshold           = 1
-  alarm_actions       = [aws_sns_topic.alarm_notifications.arn]
-  treat_missing_data  = "notBreaching"
-}
-
-resource "aws_cloudwatch_metric_alarm" "nova_api_slow" {
-  alarm_name          = "${var.project_name}-NovaApiSlowResponses-${var.environment}"
-  alarm_description   = "Nova API requests are consistently slow"
-  comparison_operator = "GreaterThanOrEqualToThreshold"
-  evaluation_periods  = 1
-  metric_name         = aws_cloudwatch_log_metric_filter.nova_api_slow_response.metric_transformation[0].name
-  namespace           = local.metric_namespace
-  period              = 300
-  statistic           = "Sum"
-  threshold           = 1
-  alarm_actions       = [aws_sns_topic.alarm_notifications.arn]
-  treat_missing_data  = "notBreaching"
 }
 
 resource "aws_cloudwatch_metric_alarm" "api_gateway_5xx" {

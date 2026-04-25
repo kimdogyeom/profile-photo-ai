@@ -43,6 +43,7 @@ module "app" {
   daily_limit           = var.daily_limit
   domain_name           = var.domain_name
   hosted_zone_name      = var.hosted_zone_name
+  acm_certificate_arn   = var.acm_certificate_arn
   discord_webhook_url   = var.discord_webhook_url
   cors_allowed_origins  = var.cors_allowed_origins
   lambda_artifact_paths = local.lambda_artifact_paths
@@ -70,6 +71,10 @@ output "cognito_user_pool_id" {
 
 output "cognito_user_pool_client_id" {
   value = module.app.cognito_user_pool_client_id
+}
+
+output "cognito_domain" {
+  value = module.app.cognito_domain
 }
 
 output "aws_region" {

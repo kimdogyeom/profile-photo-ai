@@ -7,7 +7,7 @@ import AuthModal from './components/auth/AuthModal';
 import { PhoneFrame } from './components/PhoneFrame';
 import { Logo } from './components/Logo';
 import { PaletteIcon, ZapIcon, TargetIcon, UploadIcon } from './components/Icons';
-import { isAuthenticated, logout, getUserInfo } from './services/auth';
+import { handleAuthCallback, isAuthenticated, logout, getUserInfo } from './services/auth';
 import './App.css';
 
 function App() {
@@ -16,20 +16,40 @@ function App() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Check authentication status on mount
-    const checkAuth = () => {
-      const authed = isAuthenticated();
-      setAuthenticated(authed);
-      
-      if (authed) {
-        const info = getUserInfo();
-        setUserInfo(info);
+    let isMounted = true;
+
+    const checkAuth = async () => {
+      try {
+        const callbackResult = await handleAuthCallback();
+
+        if (callbackResult?.handled) {
+          window.location.replace(isAuthenticated() ? '/generate' : '/');
+          return;
+        }
+      } catch (error) {
+        console.error('Failed to complete Cognito callback:', error);
+        window.location.replace('/');
+        return;
       }
-      
-      setLoading(false);
+
+      const authed = isAuthenticated();
+      if (isMounted) {
+        setAuthenticated(authed);
+
+        if (authed) {
+          const info = getUserInfo();
+          setUserInfo(info);
+        }
+
+        setLoading(false);
+      }
     };
 
     checkAuth();
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   if (loading) {
@@ -86,13 +106,11 @@ function App() {
 // Landing page with features
 const LandingPage = () => {
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [authView, setAuthView] = useState('login');
 
-  const handleAuthClick = () => {
+  const handleAuthClick = (view = 'login') => {
+    setAuthView(view);
     setShowAuthModal(true);
-  };
-
-  const handleAuthSuccess = () => {
-    window.location.href = '/generate';
   };
 
   return (
@@ -100,117 +118,117 @@ const LandingPage = () => {
       <AuthModal 
         isOpen={showAuthModal} 
         onClose={() => setShowAuthModal(false)}
-        onSuccess={handleAuthSuccess}
+        initialView={authView}
       />
-    <div style={styles.loginContainer}>
-      {/* Background pattern */}
-      <div style={styles.backgroundPattern}></div>
+      <div style={styles.loginContainer}>
+        {/* Background pattern */}
+        <div style={styles.backgroundPattern}></div>
 
-      {/* Semi-transparent overlay */}
-      <div style={styles.overlay}></div>
+        {/* Semi-transparent overlay */}
+        <div style={styles.overlay}></div>
 
-      {/* Content */}
-      <div style={styles.contentWrapper} className="login-page-content">
-        {/* Left side - Text and CTA */}
-        <div style={styles.leftSection} className="login-page-left">
-          <Logo size="xlarge" variant="full" />
-          <p style={styles.subtitle} className="login-page-subtitle">AI로 완벽한 프로필 사진을 만들어보세요</p>
+        {/* Content */}
+        <div style={styles.contentWrapper} className="login-page-content">
+          {/* Left side - Text and CTA */}
+          <div style={styles.leftSection} className="login-page-left">
+            <Logo size="xlarge" variant="full" />
+            <p style={styles.subtitle} className="login-page-subtitle">AI로 완벽한 프로필 사진을 만들어보세요</p>
 
-          <div style={styles.features} className="login-page-features">
-            <div style={styles.feature} className="login-page-feature">
-              <div style={styles.featureIconWrapper}>
-                <PaletteIcon size={32} color="#667eea" />
+            <div style={styles.features} className="login-page-features">
+              <div style={styles.feature} className="login-page-feature">
+                <div style={styles.featureIconWrapper}>
+                  <PaletteIcon size={32} color="#667eea" />
+                </div>
+                <div>
+                  <h3 style={styles.featureTitle} className="login-page-feature-title">다양한 스타일</h3>
+                  <p style={styles.featureText} className="login-page-feature-text">프로페셔널, 캐주얼 등 원하는 스타일 선택</p>
+                </div>
               </div>
-              <div>
-                <h3 style={styles.featureTitle} className="login-page-feature-title">다양한 스타일</h3>
-                <p style={styles.featureText} className="login-page-feature-text">프로페셔널, 캐주얼 등 원하는 스타일 선택</p>
+              <div style={styles.feature} className="login-page-feature">
+                <div style={styles.featureIconWrapper}>
+                  <ZapIcon size={32} color="#667eea" />
+                </div>
+                <div>
+                  <h3 style={styles.featureTitle} className="login-page-feature-title">빠른 생성</h3>
+                  <p style={styles.featureText} className="login-page-feature-text">AI가 몇 분 안에 완성합니다</p>
+                </div>
+              </div>
+              <div style={styles.feature} className="login-page-feature">
+                <div style={styles.featureIconWrapper}>
+                  <TargetIcon size={32} color="#667eea" />
+                </div>
+                <div>
+                  <h3 style={styles.featureTitle} className="login-page-feature-title">전문 품질</h3>
+                  <p style={styles.featureText} className="login-page-feature-text">고해상도의 전문적인 결과물</p>
+                </div>
               </div>
             </div>
-            <div style={styles.feature} className="login-page-feature">
-              <div style={styles.featureIconWrapper}>
-                <ZapIcon size={32} color="#667eea" />
-              </div>
-              <div>
-                <h3 style={styles.featureTitle} className="login-page-feature-title">빠른 생성</h3>
-                <p style={styles.featureText} className="login-page-feature-text">AI가 몇 분 안에 완성합니다</p>
-              </div>
+
+            <div style={styles.buttonGroup} className="button-group">
+              <button
+                onClick={() => handleAuthClick('login')}
+                style={styles.primaryButton}
+                className="login-page-button primary-btn"
+                onMouseEnter={(e) => {
+                  e.target.style.transform = 'translateY(-2px)';
+                  e.target.style.boxShadow = '0 12px 32px rgba(102, 126, 234, 0.5)';
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.transform = 'translateY(0)';
+                  e.target.style.boxShadow = '0 8px 24px rgba(102, 126, 234, 0.4)';
+                }}
+              >
+                로그인
+              </button>
+
+              <button
+                onClick={() => handleAuthClick('signup')}
+                style={styles.secondaryButton}
+                className="login-page-button secondary-btn"
+                onMouseEnter={(e) => {
+                  e.target.style.background = 'rgba(102, 126, 234, 0.15)';
+                  e.target.style.transform = 'translateY(-2px)';
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.background = 'rgba(102, 126, 234, 0.1)';
+                  e.target.style.transform = 'translateY(0)';
+                }}
+              >
+                회원가입
+              </button>
             </div>
-            <div style={styles.feature} className="login-page-feature">
-              <div style={styles.featureIconWrapper}>
-                <TargetIcon size={32} color="#667eea" />
-              </div>
-              <div>
-                <h3 style={styles.featureTitle} className="login-page-feature-title">전문 품질</h3>
-                <p style={styles.featureText} className="login-page-feature-text">고해상도의 전문적인 결과물</p>
-              </div>
-            </div>
+
+            <p style={styles.note}>
+              * 안전하게 로그인됩니다
+            </p>
           </div>
 
-          <div style={styles.buttonGroup} className="button-group">
-            <button
-              onClick={handleAuthClick}
-              style={styles.primaryButton}
-              className="login-page-button primary-btn"
-              onMouseEnter={(e) => {
-                e.target.style.transform = 'translateY(-2px)';
-                e.target.style.boxShadow = '0 12px 32px rgba(102, 126, 234, 0.5)';
-              }}
-              onMouseLeave={(e) => {
-                e.target.style.transform = 'translateY(0)';
-                e.target.style.boxShadow = '0 8px 24px rgba(102, 126, 234, 0.4)';
-              }}
-            >
-              로그인
-            </button>
-
-            <button
-              onClick={handleAuthClick}
-              style={styles.secondaryButton}
-              className="login-page-button secondary-btn"
-              onMouseEnter={(e) => {
-                e.target.style.background = 'rgba(102, 126, 234, 0.15)';
-                e.target.style.transform = 'translateY(-2px)';
-              }}
-              onMouseLeave={(e) => {
-                e.target.style.background = 'rgba(102, 126, 234, 0.1)';
-                e.target.style.transform = 'translateY(0)';
-              }}
-            >
-              회원가입
-            </button>
+          {/* Right side - Phone mockup */}
+          <div style={styles.rightSection} className="login-page-right">
+            <PhoneFrame>
+              <div style={styles.phoneContent}>
+                <div style={styles.mockHeader}>
+                  <div style={styles.logoBadge}>
+                    <Logo size="small" variant="full" />
+                  </div>
+                </div>
+                <div style={styles.mockBody}>
+                  <div style={styles.mockUploadArea}>
+                    <UploadIcon size={40} color="#999" />
+                    <p style={styles.mockUploadText}>사진 업로드</p>
+                  </div>
+                  <div style={styles.mockStyles}>
+                    <div style={styles.mockStyleCard}>Professional</div>
+                    <div style={styles.mockStyleCard}>Casual</div>
+                    <div style={styles.mockStyleCard}>Creative</div>
+                  </div>
+                  <div style={styles.mockButton}>생성하기</div>
+                </div>
+              </div>
+            </PhoneFrame>
           </div>
-
-          <p style={styles.note}>
-            * 안전하게 로그인됩니다
-          </p>
-        </div>
-
-        {/* Right side - Phone mockup */}
-        <div style={styles.rightSection} className="login-page-right">
-          <PhoneFrame>
-            <div style={styles.phoneContent}>
-              <div style={styles.mockHeader}>
-                <div style={styles.logoBadge}>
-                  <Logo size="small" variant="full" />
-                </div>
-              </div>
-              <div style={styles.mockBody}>
-                <div style={styles.mockUploadArea}>
-                  <UploadIcon size={40} color="#999" />
-                  <p style={styles.mockUploadText}>사진 업로드</p>
-                </div>
-                <div style={styles.mockStyles}>
-                  <div style={styles.mockStyleCard}>Professional</div>
-                  <div style={styles.mockStyleCard}>Casual</div>
-                  <div style={styles.mockStyleCard}>Creative</div>
-                </div>
-                <div style={styles.mockButton}>생성하기</div>
-              </div>
-            </div>
-          </PhoneFrame>
         </div>
       </div>
-    </div>
     </>
   );
 };

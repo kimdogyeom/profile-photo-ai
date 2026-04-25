@@ -3,6 +3,9 @@ const requiredEnv = {
   REACT_APP_AWS_REGION: /^[a-z]{2}-[a-z]+-\d$/u,
   REACT_APP_COGNITO_USER_POOL_ID: /^[a-z]{2}-[a-z]+-\d_[A-Za-z0-9]+$/u,
   REACT_APP_COGNITO_CLIENT_ID: /^[A-Za-z0-9]{10,}$/u,
+  REACT_APP_COGNITO_DOMAIN: /^[A-Za-z0-9.-]+$/u,
+  REACT_APP_REDIRECT_URI: /^https?:\/\/.+/u,
+  REACT_APP_LOGOUT_URI: /^https?:\/\/.+/u,
 };
 
 const errors = [];

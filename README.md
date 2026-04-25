@@ -32,7 +32,7 @@ AI로 프로필 사진을 생성하는 기능 자체보다 어려운 문제는, 
 
 ## 핵심 기능
 
-- Cognito 기반 회원가입/로그인과 인증된 사용자 전용 API 접근 제어
+- Cognito Hosted UI 기반 회원가입/로그인과 인증된 사용자 전용 API 접근 제어
 - 브라우저에서 S3로 직접 업로드하는 presigned POST 기반 파일 업로드
 - JPG, PNG, WEBP 업로드 지원과 데스크톱 웹캠 촬영 지원
 - 취업/증명사진 용도에 맞춘 10개 스타일 프리셋과 커스텀 프롬프트 입력
@@ -58,3 +58,13 @@ AI로 프로필 사진을 생성하는 기능 자체보다 어려운 문제는, 
 ### 4. 결과 전달과 운영 단순화
 
 생성 결과는 S3에 저장하되, 다운로드 시점에만 presigned URL을 발급하도록 구성했습니다. 이 방식으로 버킷을 직접 공개하지 않으면서도 결과 전달을 단순하게 유지했고, 전체 인프라는 Terraform으로 관리해 dev/prod 환경을 재현 가능하게 정리했습니다.
+
+## 프론트엔드 인증 구성
+
+프론트엔드는 Cognito Hosted UI의 Authorization Code + PKCE 흐름을 사용합니다.
+
+- `REACT_APP_COGNITO_DOMAIN`
+- `REACT_APP_REDIRECT_URI`
+- `REACT_APP_LOGOUT_URI`
+
+로그인과 회원가입은 브라우저에서 Cognito Hosted UI로 리다이렉트되고, callback 단계에서 토큰을 교환한 뒤 기존 API 호출에 필요한 JWT를 저장합니다.
