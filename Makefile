@@ -76,7 +76,7 @@ test: ## 백엔드/프론트엔드 테스트 실행
 lint: ## Python 및 Terraform 정적 점검
 	python -m compileall backend tests
 	if command -v flake8 >/dev/null 2>&1; then \
-		flake8 backend/common backend/lambda/api backend/lambda/file_transfer backend/lambda/process tests --max-line-length=120 --extend-ignore=E203,E266,E501; \
+		python -m flake8 backend/common backend/lambda/api backend/lambda/file_transfer backend/lambda/process tests --max-line-length=120 --extend-ignore=E203,E266,E501; \
 	else \
 		echo "flake8 is not installed; compileall check only"; \
 	fi

@@ -9,3 +9,4 @@ def test_makefile_contains_test_and_lint_targets():
     assert re.search(r"(?m)^\.PHONY: .*\btest\b.*\blint\b", content)
     assert re.search(r"(?m)^test:\s*##", content)
     assert re.search(r"(?m)^lint:\s*##", content)
+    assert "python -m flake8" in content
