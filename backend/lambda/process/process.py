@@ -148,6 +148,7 @@ def _get_negative_prompt() -> str:
 def lambda_handler(event, context):
     processed_count = 0
     failed_count = 0
+    failed_items = []
 
     batch_size = len(event["Records"])
     metrics.add_metric(name="BatchSize", unit=MetricUnit.Count, value=batch_size)
@@ -288,6 +289,9 @@ def lambda_handler(event, context):
                     },
                 )
 
+            message_id = record.get("messageId") or str(len(failed_items))
+            failed_items.append({"itemIdentifier": message_id})
+
     logger.info(
         "Batch processing complete",
         extra={
@@ -310,6 +314,7 @@ def lambda_handler(event, context):
                 "failed": failed_count,
             }
         ),
+        "batchItemFailures": failed_items,
     }
 
 

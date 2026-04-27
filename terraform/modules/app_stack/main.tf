@@ -623,10 +623,11 @@ module "image_process" {
 }
 
 resource "aws_lambda_event_source_mapping" "image_process" {
-  event_source_arn = aws_sqs_queue.image_process.arn
-  function_name    = module.image_process.lambda_arn
-  batch_size       = 1
-  enabled          = true
+  event_source_arn        = aws_sqs_queue.image_process.arn
+  function_name           = module.image_process.lambda_arn
+  batch_size              = 1
+  function_response_types = ["ReportBatchItemFailures"]
+  enabled                 = true
 }
 
 data "aws_iam_policy_document" "stats_aggregator" {
