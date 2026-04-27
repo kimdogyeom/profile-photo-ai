@@ -1,4 +1,4 @@
-.PHONY: help frontend-install frontend-build lambda-build tf-fmt bootstrap-apply bootstrap-write-backends tf-bootstrap tf-bootstrap-dev tf-bootstrap-prod tf-validate-dev tf-validate-prod tf-plan-dev tf-plan-prod tf-apply-dev tf-apply-prod tf-destroy-dev tf-destroy-prod deploy-frontend-dev deploy-frontend-prod clean
+.PHONY: help frontend-install frontend-build lambda-build tf-fmt bootstrap-apply bootstrap-write-backends tf-bootstrap tf-bootstrap-dev tf-bootstrap-prod tf-validate-dev tf-validate-prod tf-plan-dev tf-plan-prod tf-apply-dev tf-apply-prod tf-destroy-dev tf-destroy-prod deploy-frontend-dev deploy-frontend-prod clean test lint
 
 ENV ?= dev
 
@@ -68,6 +68,21 @@ deploy-frontend-dev: ## dev 프론트엔드 배포
 
 deploy-frontend-prod: ## prod 프론트엔드 배포
 	./scripts/deploy-frontend.sh prod
+
+test: ## 백엔드/프론트엔드 테스트 실행
+	python -m pytest -q tests/unit tests/integration
+	cd frontend && npm run test:ci
+
+lint: ## Python 및 Terraform 정적 점검
+	python -m compileall backend tests
+	if command -v flake8 >/dev/null 2>&1; then \
+		flake8 backend/common backend/lambda/api backend/lambda/file_transfer backend/lambda/process tests --max-line-length=120 --extend-ignore=E203,E266,E501; \
+	else \
+		echo "flake8 is not installed; compileall check only"; \
+	fi
+	terraform -chdir=terraform/bootstrap fmt -check -recursive
+	terraform -chdir=terraform/envs/dev fmt -check -recursive
+	terraform -chdir=terraform/envs/prod fmt -check -recursive
 
 clean: ## 빌드 산출물 정리
 	rm -rf dist frontend/build
