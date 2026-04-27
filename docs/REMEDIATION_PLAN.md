@@ -12,7 +12,7 @@
 
 - GitHub Actions와 배포 경로를 실서비스 기준으로 안전하게 복구
 - 백엔드와 프론트엔드 테스트를 다시 실행 가능한 상태로 복원
-- 오래된 운영 가정(SAM, Google OAuth, 가짜 health check)을 제거
+- 오래된 운영 가정(legacy SAM 기반 구성, 가짜 health check)을 제거
 - 이후 작업자가 문서를 따라 순차적으로 보완할 수 있도록 기준 문서화
 
 ## Phase 1. 운영 안정화

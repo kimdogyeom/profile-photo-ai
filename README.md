@@ -19,6 +19,7 @@ ProfilePhotoAI는 사용자가 원본 사진을 업로드하면 취업용 프로
 - `make bootstrap-apply`로 Terraform bootstrap 스택을 먼저 적용할 수 있습니다. 이 단계는 AWS state backend, GitHub OIDC/IAM role, GitHub Environment variable까지 함께 관리하므로 `GITHUB_TOKEN`이 필요합니다.
 - `make tf-bootstrap-dev` 또는 `make tf-bootstrap-prod`는 bootstrap output 기준으로 각 환경의 `backend.hcl`을 생성하고 backend를 초기화합니다.
 - `./scripts/tf.sh init <dev|prod>`는 `backend.hcl`이 없으면 각 환경의 `backend.hcl.example`을 자동으로 사용합니다.
+- `make test`로 백엔드/프론트엔드 전체 테스트를, `make lint`로 Python/TF 포맷 및 기본 정적검사를 실행할 수 있습니다.
 - `./scripts/build-lambdas.sh`는 `dist/lambda/*.zip`을 다시 만들고, `./scripts/deploy-frontend.sh <env>`는 `frontend/build/index.html`이 생성된 뒤에만 S3/CloudFront에 반영합니다.
 
 ## 문제 정의
