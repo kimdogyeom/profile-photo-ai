@@ -133,12 +133,26 @@ describe('auth service', () => {
     expect(auth.getRefreshToken()).toBe('refresh-token');
     expect(auth.isAuthenticated()).toBe(true);
     expect(auth.getUserInfo().email).toBe('tester@example.com');
+    expect(localStorage.getItem('idToken')).toBeNull();
+    expect(localStorage.getItem('refreshToken')).toBeNull();
+    expect(localStorage.getItem('accessToken')).toBeNull();
+    expect(localStorage.getItem('userInfo')).toBeNull();
   });
 
   it('treats a non-expired id token as authenticated', () => {
     const auth = require('./auth');
-    localStorage.setItem('idToken', createToken({ exp: Math.floor(Date.now() / 1000) + 3600 }));
+    sessionStorage.setItem('idToken', createToken({ exp: Math.floor(Date.now() / 1000) + 3600 }));
 
     expect(auth.isAuthenticated()).toBe(true);
+  });
+
+  it('uses session storage for tokens to reduce persistence risk', () => {
+    const auth = require('./auth');
+    const tokenPayload = createToken({ exp: Math.floor(Date.now() / 1000) + 3600 });
+    auth.clearTokens();
+    localStorage.setItem('idToken', tokenPayload);
+    expect(auth.getIdToken()).toBeNull();
+    sessionStorage.setItem('idToken', tokenPayload);
+    expect(auth.getIdToken()).toBe(tokenPayload);
   });
 });

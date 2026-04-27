@@ -220,20 +220,23 @@ const postTokenRequest = async (body) => {
   return response.json();
 };
 
+const getTokenStorage = (currentWindow) => currentWindow.sessionStorage;
+
 const storeSession = ({ idToken, accessToken, refreshToken }) => {
   const currentWindow = ensureStorage();
-  currentWindow.localStorage.setItem(TOKEN_KEY, idToken);
-  currentWindow.localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
+  const storage = getTokenStorage(currentWindow);
+  storage.setItem(TOKEN_KEY, idToken);
+  storage.setItem(ACCESS_TOKEN_KEY, accessToken);
 
   if (refreshToken) {
-    currentWindow.localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+    storage.setItem(REFRESH_TOKEN_KEY, refreshToken);
   }
 
   const userInfo = safeParseJwt(idToken);
   if (userInfo) {
-    currentWindow.localStorage.setItem(USER_INFO_KEY, JSON.stringify(userInfo));
+    storage.setItem(USER_INFO_KEY, JSON.stringify(userInfo));
   } else {
-    currentWindow.localStorage.removeItem(USER_INFO_KEY);
+    storage.removeItem(USER_INFO_KEY);
   }
 };
 
@@ -384,17 +387,17 @@ export const logout = ({ redirect = true } = {}) => {
 
 export const getIdToken = () => {
   const currentWindow = getWindow();
-  return currentWindow ? currentWindow.localStorage.getItem(TOKEN_KEY) : null;
+  return currentWindow ? currentWindow.sessionStorage.getItem(TOKEN_KEY) : null;
 };
 
 export const getAccessToken = () => {
   const currentWindow = getWindow();
-  return currentWindow ? currentWindow.localStorage.getItem(ACCESS_TOKEN_KEY) : null;
+  return currentWindow ? currentWindow.sessionStorage.getItem(ACCESS_TOKEN_KEY) : null;
 };
 
 export const getRefreshToken = () => {
   const currentWindow = getWindow();
-  return currentWindow ? currentWindow.localStorage.getItem(REFRESH_TOKEN_KEY) : null;
+  return currentWindow ? currentWindow.sessionStorage.getItem(REFRESH_TOKEN_KEY) : null;
 };
 
 export const getUserInfo = () => {
@@ -404,7 +407,7 @@ export const getUserInfo = () => {
     return null;
   }
 
-  const value = currentWindow.localStorage.getItem(USER_INFO_KEY);
+  const value = currentWindow.sessionStorage.getItem(USER_INFO_KEY);
 
   if (!value) {
     return null;
@@ -425,10 +428,10 @@ export const clearTokens = () => {
     return;
   }
 
-  currentWindow.localStorage.removeItem(TOKEN_KEY);
-  currentWindow.localStorage.removeItem(ACCESS_TOKEN_KEY);
-  currentWindow.localStorage.removeItem(REFRESH_TOKEN_KEY);
-  currentWindow.localStorage.removeItem(USER_INFO_KEY);
+  currentWindow.sessionStorage.removeItem(TOKEN_KEY);
+  currentWindow.sessionStorage.removeItem(ACCESS_TOKEN_KEY);
+  currentWindow.sessionStorage.removeItem(REFRESH_TOKEN_KEY);
+  currentWindow.sessionStorage.removeItem(USER_INFO_KEY);
 };
 
 export const isAuthenticated = () => {
