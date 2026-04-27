@@ -456,6 +456,7 @@ module "file_transfer" {
   environment_variables = {
     UPLOAD_BUCKET                = aws_s3_bucket.upload.bucket
     PRESIGNED_URL_EXPIRATION     = "3600"
+    CORS_ALLOWED_ORIGINS         = jsonencode(var.cors_allowed_origins)
     POWERTOOLS_SERVICE_NAME      = "ProfilePhotoAI"
     POWERTOOLS_METRICS_NAMESPACE = "ProfilePhotoAI/Metrics"
   }
@@ -525,6 +526,7 @@ module "api_manager" {
     SQS_QUEUE_URL                = aws_sqs_queue.image_process.id
     UPLOAD_BUCKET                = aws_s3_bucket.upload.bucket
     RESULT_BUCKET                = aws_s3_bucket.result.bucket
+    CORS_ALLOWED_ORIGINS         = jsonencode(var.cors_allowed_origins)
     USERS_TABLE                  = aws_dynamodb_table.users.name
     USAGE_LOG_TABLE              = aws_dynamodb_table.usage_log.name
     IMAGE_JOBS_TABLE             = aws_dynamodb_table.image_jobs.name

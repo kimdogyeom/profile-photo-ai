@@ -102,12 +102,46 @@ def _get_job_download_expiry_seconds() -> int:
     return int(os.environ.get("JOB_DOWNLOAD_EXPIRY_SECONDS", "86400"))
 
 
+def _get_cors_allowed_origins():
+    raw = os.environ.get("CORS_ALLOWED_ORIGINS", "*")
+    if not raw:
+        return ["*"]
+
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, list):
+            return [str(item) for item in parsed]
+    except json.JSONDecodeError:
+        pass
+
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def _get_request_origin(event_headers=None):
+    if not event_headers:
+        return None
+    for key, value in event_headers.items():
+        if key.lower() == "origin":
+            return value
+    return None
+
+
+def _select_allow_origin(request_origin):
+    allowed_origins = _get_cors_allowed_origins()
+    if "*" in allowed_origins:
+        return "*"
+    if request_origin in allowed_origins:
+        return request_origin
+    return None
+
+
 @logger.inject_lambda_context(correlation_id_path=correlation_paths.API_GATEWAY_HTTP)
 @tracer.capture_lambda_handler
 @metrics.log_metrics
 def lambda_handler(event, context):
     request_id = context.aws_request_id if context else "local-request"
     logger.append_keys(requestId=request_id)
+    request_origin = _get_request_origin(event.get("headers") or {})
 
     try:
         http_method = event.get("requestContext", {}).get("http", {}).get(
@@ -117,34 +151,34 @@ def lambda_handler(event, context):
 
         stage = event.get("requestContext", {}).get("stage", "")
         if stage and raw_path.startswith(f"/{stage}/"):
-            raw_path = raw_path[len(f"/{stage}") :]
+            raw_path = raw_path[len(f"/{stage}"):]
 
         logger.info(
             "Processing request", extra={"method": http_method, "path": raw_path}
         )
 
         if http_method == "OPTIONS":
-            return cors_response(200, {})
+            return cors_response(200, {}, request_origin)
         if http_method == "GET" and raw_path == "/healthz":
-            return handle_healthz()
+            return handle_healthz(request_origin)
         if http_method == "POST" and raw_path == "/generate":
-            return handle_generate_image(event)
+            return handle_generate_image(event, request_origin)
         if http_method == "GET" and raw_path.startswith("/jobs/"):
             if raw_path.endswith("/download"):
-                return handle_download_image(event)
-            return handle_get_job(event)
+                return handle_download_image(event, request_origin)
+            return handle_get_job(event, request_origin)
         if http_method == "GET" and raw_path == "/user/me":
-            return handle_get_user_info(event)
+            return handle_get_user_info(event, request_origin)
         if http_method == "GET" and raw_path == "/user/jobs":
-            return handle_get_user_jobs(event)
-        return cors_response(404, {"error": "Not Found"})
+            return handle_get_user_jobs(event, request_origin)
+        return cors_response(404, {"error": "Not Found"}, request_origin)
     except Exception as error:
         logger.exception("Unhandled API error", extra={"error": str(error)})
-        return cors_response(500, {"error": "Internal server error"})
+        return cors_response(500, {"error": "Internal server error"}, request_origin)
 
 
 @tracer.capture_method
-def handle_generate_image(event):
+def handle_generate_image(event, cors_origin=None):
     start_time = time.time()
     job_id = None
     quota_reserved = False
@@ -152,12 +186,14 @@ def handle_generate_image(event):
     try:
         user_id = extract_user_id(event)
         if not user_id:
-            return cors_response(401, {"error": "Unauthorized: User ID not found"})
+            return cors_response(
+                401, {"error": "Unauthorized: User ID not found"}, cors_origin
+            )
 
         logger.append_keys(userId=user_id)
         body = parse_request_body(event)
         if not body:
-            return cors_response(400, {"error": "Invalid request body"})
+            return cors_response(400, {"error": "Invalid request body"}, cors_origin)
 
         file_key = body.get("fileKey")
         prompt = body.get("prompt", "")
@@ -165,11 +201,13 @@ def handle_generate_image(event):
 
         validation_error = validate_generation_request(user_id, file_key, prompt)
         if validation_error:
-            return cors_response(400, {"error": validation_error})
+            return cors_response(400, {"error": validation_error}, cors_origin)
 
         upload_bucket = _get_upload_bucket()
         if not verify_s3_file_exists(upload_bucket, file_key):
-            return cors_response(404, {"error": "Uploaded file not found in S3"})
+            return cors_response(
+                404, {"error": "Uploaded file not found in S3"}, cors_origin
+            )
 
         user = UserService.get_user(user_id)
         if not user:
@@ -186,6 +224,7 @@ def handle_generate_image(event):
                     "remainingQuota": remaining_quota,
                     "message": "You have reached your daily limit. Please try again tomorrow.",
                 },
+                cors_origin,
             )
 
         quota_reserved = True
@@ -239,6 +278,7 @@ def handle_generate_image(event):
                 "remainingQuota": remaining_quota,
                 "message": "Image generation request has been queued successfully",
             },
+            cors_origin,
         )
     except Exception as error:
         logger.exception(
@@ -260,12 +300,14 @@ def handle_generate_image(event):
             )
 
         return cors_response(
-            500, {"error": "Failed to queue image generation request", "jobId": job_id}
+            500,
+            {"error": "Failed to queue image generation request", "jobId": job_id},
+            cors_origin,
         )
 
 
 @tracer.capture_method
-def handle_healthz():
+def handle_healthz(cors_origin=None):
     return cors_response(
         200,
         {
@@ -273,34 +315,35 @@ def handle_healthz():
             "service": "api-manager",
             "environment": _get_environment(),
         },
+        cors_origin,
     )
 
 
 @tracer.capture_method
-def handle_get_job(event):
+def handle_get_job(event, cors_origin=None):
     user_id = extract_user_id(event)
     if not user_id:
-        return cors_response(401, {"error": "Unauthorized: User ID not found"})
+        return cors_response(401, {"error": "Unauthorized: User ID not found"}, cors_origin)
 
     job_id = (event.get("rawPath") or event.get("path", "")).split("/")[-1]
     if not job_id:
-        return cors_response(400, {"error": "jobId is required"})
+        return cors_response(400, {"error": "jobId is required"}, cors_origin)
 
     job = ImageJobService.get_job(job_id)
     if not job:
-        return cors_response(404, {"error": "Job not found"})
+        return cors_response(404, {"error": "Job not found"}, cors_origin)
     if job.get("userId") != user_id:
-        return cors_response(403, {"error": "Forbidden: Access denied"})
+        return cors_response(403, {"error": "Forbidden: Access denied"}, cors_origin)
 
     hydrated = hydrate_completed_job(job)
-    return cors_response(200, hydrated)
+    return cors_response(200, hydrated, cors_origin)
 
 
 @tracer.capture_method
-def handle_get_user_info(event):
+def handle_get_user_info(event, cors_origin=None):
     user_id = extract_user_id(event)
     if not user_id:
-        return cors_response(401, {"error": "Unauthorized: User ID not found"})
+        return cors_response(401, {"error": "Unauthorized: User ID not found"}, cors_origin)
 
     user = UserService.get_user(user_id)
     if not user:
@@ -320,14 +363,14 @@ def handle_get_user_info(event):
         "createdAt": user.get("createdAt", ""),
         "lastLoginAt": user.get("lastLoginAt", ""),
     }
-    return cors_response(200, response)
+    return cors_response(200, response, cors_origin)
 
 
 @tracer.capture_method
-def handle_get_user_jobs(event):
+def handle_get_user_jobs(event, cors_origin=None):
     user_id = extract_user_id(event)
     if not user_id:
-        return cors_response(401, {"error": "Unauthorized: User ID not found"})
+        return cors_response(401, {"error": "Unauthorized: User ID not found"}, cors_origin)
 
     query_params = event.get("queryStringParameters") or {}
     limit = min(int(query_params.get("limit", 20)), 100)
@@ -345,35 +388,35 @@ def handle_get_user_jobs(event):
         "nextToken": result.get("nextToken"),
         "hasMore": bool(result.get("nextToken")),
     }
-    return cors_response(200, response)
+    return cors_response(200, response, cors_origin)
 
 
 @tracer.capture_method
-def handle_download_image(event):
+def handle_download_image(event, cors_origin=None):
     user_id = extract_user_id(event)
     if not user_id:
-        return cors_response(401, {"error": "Unauthorized: User ID not found"})
+        return cors_response(401, {"error": "Unauthorized: User ID not found"}, cors_origin)
 
     raw_path = event.get("rawPath") or event.get("path", "")
     path_parts = raw_path.split("/")
     job_id = path_parts[-2] if len(path_parts) >= 3 else None
     if not job_id:
-        return cors_response(400, {"error": "jobId is required"})
+        return cors_response(400, {"error": "jobId is required"}, cors_origin)
 
     job = ImageJobService.get_job(job_id)
     if not job:
-        return cors_response(404, {"error": "Job not found"})
+        return cors_response(404, {"error": "Job not found"}, cors_origin)
     if job.get("userId") != user_id:
-        return cors_response(403, {"error": "Forbidden: Access denied"})
+        return cors_response(403, {"error": "Forbidden: Access denied"}, cors_origin)
     if job.get("status") != "completed":
-        return cors_response(400, {"error": "Job not completed yet"})
+        return cors_response(400, {"error": "Job not completed yet"}, cors_origin)
 
     download_url = generate_presigned_download_url(job, expires_in=3600)
     if not download_url:
-        return cors_response(404, {"error": "Output image not found"})
+        return cors_response(404, {"error": "Output image not found"}, cors_origin)
 
     return cors_response(
-        200, {"downloadUrl": download_url, "expiresIn": 3600, "jobId": job_id}
+        200, {"downloadUrl": download_url, "expiresIn": 3600, "jobId": job_id}, cors_origin
     )
 
 
@@ -488,15 +531,22 @@ def verify_s3_file_exists(bucket: str, key: str) -> bool:
         raise
 
 
-def cors_response(status_code: int, body: Dict) -> Dict:
+def cors_headers(request_origin=None):
+    headers = {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Headers": "Content-Type,Authorization",
+        "Access-Control-Allow-Methods": "POST,GET,OPTIONS",
+    }
+    allow_origin = _select_allow_origin(request_origin)
+    if allow_origin:
+        headers["Access-Control-Allow-Origin"] = allow_origin
+    return headers
+
+
+def cors_response(status_code: int, body: Dict, request_origin=None) -> Dict:
     return {
         "statusCode": status_code,
-        "headers": {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Headers": "Content-Type,Authorization",
-            "Access-Control-Allow-Methods": "POST,GET,OPTIONS",
-        },
+        "headers": cors_headers(request_origin),
         "body": json.dumps(body, cls=DecimalEncoder),
     }
 

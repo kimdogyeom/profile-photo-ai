@@ -5,6 +5,7 @@ import time
 import uuid
 from datetime import UTC, datetime
 from functools import lru_cache
+from typing import Optional
 
 import boto3
 from aws_lambda_powertools import Logger, Tracer
@@ -76,6 +77,39 @@ def _get_presigned_url_expiration() -> int:
     return int(os.environ.get("PRESIGNED_URL_EXPIRATION", "3600"))
 
 
+def _get_cors_allowed_origins() -> list[str]:
+    raw = os.environ.get("CORS_ALLOWED_ORIGINS", "*")
+    if not raw:
+        return ["*"]
+
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, list):
+            return [str(item) for item in parsed]
+    except json.JSONDecodeError:
+        pass
+
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def _get_request_origin(headers=None) -> Optional[str]:
+    if not headers:
+        return None
+    for key, value in headers.items():
+        if key.lower() == "origin":
+            return value
+    return None
+
+
+def _select_allow_origin(request_origin):
+    allowed_origins = _get_cors_allowed_origins()
+    if "*" in allowed_origins:
+        return "*"
+    if request_origin in allowed_origins:
+        return request_origin
+    return None
+
+
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 ALLOWED_CONTENT_TYPES = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
 MAX_FILE_SIZE = 10 * 1024 * 1024
@@ -85,15 +119,16 @@ MAX_FILE_SIZE = 10 * 1024 * 1024
 @tracer.capture_lambda_handler
 def lambda_handler(event, context):
     request_start = time.time()
+    request_origin = _get_request_origin(event.get("headers") or {})
 
     try:
         user_id = extract_user_id(event)
         if not user_id:
-            return error_response(401, "Unauthorized: User ID not found")
+            return error_response(401, "Unauthorized: User ID not found", request_origin)
 
         body = parse_request_body(event)
         if not body:
-            return error_response(400, "Invalid request body")
+            return error_response(400, "Invalid request body", request_origin)
 
         file_name = body.get("fileName")
         content_type = body.get("contentType")
@@ -101,7 +136,7 @@ def lambda_handler(event, context):
 
         validation_error = validate_upload_request(file_name, content_type, file_size)
         if validation_error:
-            return error_response(400, validation_error)
+            return error_response(400, validation_error, request_origin)
 
         file_key = generate_file_key(
             user_id, get_file_extension(file_name, content_type)
@@ -124,7 +159,7 @@ def lambda_handler(event, context):
 
         return {
             "statusCode": 200,
-            "headers": cors_headers(),
+            "headers": cors_headers(request_origin),
             "body": json.dumps(
                 {
                     "uploadUrl": presigned_post["url"],
@@ -132,7 +167,6 @@ def lambda_handler(event, context):
                     "uploadFields": presigned_post["fields"],
                     "fileKey": file_key,
                     "expiresIn": _get_presigned_url_expiration(),
-                    "bucket": _get_upload_bucket(),
                     "maxFileSize": MAX_FILE_SIZE,
                 }
             ),
@@ -141,7 +175,7 @@ def lambda_handler(event, context):
         logger.exception(
             "Failed to generate presigned upload", extra={"error": str(error)}
         )
-        return error_response(500, "Internal server error")
+        return error_response(500, "Internal server error", request_origin)
 
 
 def extract_user_id(event):
@@ -224,18 +258,21 @@ def generate_presigned_upload_post(bucket, key, content_type, expiration):
     )
 
 
-def cors_headers():
-    return {
+def cors_headers(origin):
+    headers = {
         "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Headers": "Content-Type,Authorization",
         "Access-Control-Allow-Methods": "POST,OPTIONS",
     }
+    allow_origin = _select_allow_origin(origin)
+    if allow_origin:
+        headers["Access-Control-Allow-Origin"] = allow_origin
+    return headers
 
 
-def error_response(status_code, message):
+def error_response(status_code, message, request_origin):
     return {
         "statusCode": status_code,
-        "headers": cors_headers(),
+        "headers": cors_headers(request_origin),
         "body": json.dumps({"error": message}),
     }
